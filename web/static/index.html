@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Book Purge Lite — Powered by Google Gemini (Ahri Smart Guard)</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="window-frame">
+    <!-- Top Window Bar: Google Book Purge [Lite] + Clickable Gemini Badge + Window Controls -->
+    <header class="window-header">
+      <div class="window-brand">
+        <span class="brand-title">Google Book Purge</span>
+        <span class="brand-badge">Lite</span>
+        <button id="headerGeminiBadgeBtn" class="gemini-pill-badge" title="Click to open Smart Guard Guardrails &amp; Ask Ahri (Gemini 3.8 Flash)">
+          ✦ Ahri • Gemini 3.8 Flash
+        </button>
+      </div>
+
+      <div class="window-controls" aria-label="Window Controls">
+        <button id="refreshBtn" class="win-ctrl-btn" title="Rescan System &amp; Storage" aria-label="Rescan">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+        <button id="minWinBtn" class="win-ctrl-btn" title="Close All Settings &amp; Guardrails" aria-label="Minimize">—</button>
+        <button id="maxWinBtn" class="win-ctrl-btn" title="Toggle Settings &amp; Guardrails" aria-label="Expand">❐</button>
+        <button id="closeBannerWinBtn" class="win-ctrl-btn" title="Close All Settings &amp; Notifications" aria-label="Close">✕</button>
+      </div>
+    </header>
+
+    <!-- Rule 3: Quiet Heads-Up Notification with 1-Tap "Purge Now" Action Button (NEVER a blocking modal!) -->
+    <div id="smartGuardHeadsUp" class="quiet-heads-up-banner hidden" role="status" aria-live="polite">
+      <div class="heads-up-left">
+        <span class="heads-up-sparkle">✦</span>
+        <div class="heads-up-text">
+          <strong id="headsUpTitle">Ahri Smart Guard • Sustained RAM Pressure (&ge;82% for 3 checks)</strong>
+          <span id="headsUpReason">Quiet Heads-Up: RAM stayed elevated for ~18s. Ready for 1-tap purge.</span>
+        </div>
+      </div>
+      <div class="heads-up-actions">
+        <button id="headsUpPurgeNowBtn" class="btn-heads-up-purge">⚡ Purge Now</button>
+        <button id="headsUpDismissBtn" class="toast-dismiss" title="Silence for 50 minutes (Cooldown Window)" aria-label="Silence notification">✕</button>
+      </div>
+    </div>
+
+    <!-- Sub-Header Status Pill Row (Right-aligned "● All Systems Normal" matching reference image) -->
+    <div class="status-pill-row">
+      <div id="cleanupBanner" class="cleanup-toast hidden" role="status" aria-live="polite">
+        <span class="toast-check">✓</span>
+        <span id="bannerTitle">One-Click Purge Complete</span>
+        <span id="bannerDetails" class="toast-sub"></span>
+        <button id="dismissBannerBtn" class="toast-dismiss" aria-label="Dismiss">✕</button>
+      </div>
+
+      <div class="system-status-pill" id="systemStatusPill">
+        <span class="status-dot" id="systemStatusDot"></span>
+        <span id="systemStatusText">All Systems Normal</span>
+      </div>
+    </div>
+
+    <!-- Main Two-Column Hero Layout (Exact Match to Reference Image) -->
+    <main class="bookpurge-hero-grid">
+      <!-- Left Column: Neon 260° RAM Arc Gauge + Action Pill Buttons -->
+      <section class="gauge-column">
+        <div class="arc-gauge-container">
+          <svg class="ram-arc-svg" viewBox="0 0 280 280" width="280" height="280">
+            <defs>
+              <linearGradient id="neonArcGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#a855f7" />
+                <stop offset="45%" stop-color="#6366f1" />
+                <stop offset="75%" stop-color="#38bdf8" />
+                <stop offset="100%" stop-color="#2dd4bf" />
+              </linearGradient>
+              <filter id="neonGlowFilter" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="8" result="blur1" />
+                <feGaussianBlur stdDeviation="3" result="blur2" />
+                <feMerge>
+                  <feMergeNode in="blur1" />
+                  <feMergeNode in="blur2" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Background Muted Track Arc (260 degrees open at bottom) -->
+            <circle
+              class="arc-track-bg"
+              cx="140"
+              cy="140"
+              r="102"
+              fill="none"
+              stroke-width="14"
+              stroke-linecap="round"
+              stroke-dasharray="462.86 640.88"
+              transform="rotate(130 140 140)"
+            />
+
+            <!-- Foreground Glowing Neon Arc -->
+            <circle
+              id="storageGaugeArc"
+              class="arc-track-fill"
+              cx="140"
+              cy="140"
+              r="102"
+              fill="none"
+              stroke="url(#neonArcGrad)"
+              stroke-width="14"
+              stroke-linecap="round"
+              filter="url(#neonGlowFilter)"
+              stroke-dasharray="0 640.88"
+              transform="rotate(130 140 140)"
+            />
+
+            <!-- Glowing White Indicator Thumb on the Arc -->
+            <circle
+              id="arcThumbIndicator"
+              class="arc-thumb-dot"
+              cx="74.4"
+              cy="218.1"
+              r="7.5"
+            />
+          </svg>
+
+          <!-- Center Readout inside the Gauge -->
+          <div class="gauge-center-readout">
+            <div class="gauge-percent" id="ramPercentText">42%</div>
+            <div class="gauge-label">RAM in Use</div>
+            <div class="gauge-sub" id="ramUsedOfTotalText">3.36 GB of 8 GB</div>
+          </div>
+        </div>
+
+        <!-- Neon Outlined Pill Buttons Below Gauge (Purge RAM | Quick Cache Clean | Ask Gemini) -->
+        <div class="dual-action-pills">
+          <button id="oneClickPurgeRamBtn" class="neon-pill-btn btn-purge-ram" title="Execute macOS sudo purge RAM release &amp; trim idle background services">
+            <svg class="pill-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 4V2m0 14v-2M8 9h2m10 0h2m-4.2-3.8L19 4m-3.2 7.8L19 13M3 21l9-9m.2-6.2L11 4"/>
+            </svg>
+            <span id="purgeRamBtnTitle">Purge RAM</span>
+          </button>
+
+          <button id="oneClickCleanBtn" class="neon-pill-btn btn-quick-clean" title="One-Click Clean: Google Play Services, Browser, YouTube, All Installed Apps, Orphan APKs, Process Trimmer &amp; RAM Purge">
+            <svg class="pill-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 3l-7 7-4-4-6 6 10 10 6-6-4-4 7-7-2-2z"/>
+            </svg>
+            <span id="cleanBtnTitle">Quick Cache Clean</span>
+          </button>
+
+          <button id="askGeminiPillBtn" class="neon-pill-btn btn-ask-gemini" title="Open Smart Guard Guardrails &amp; Ask Ahri (Google Gemini 3.8 Flash)">
+            <span class="pill-sparkle" aria-hidden="true">✦</span>
+            <span id="askGeminiPillTitle">Ask Gemini</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Column: Frosted Glass Storage Status Card -->
+      <section class="storage-column">
+        <div class="storage-status-card">
+          <div class="storage-card-top">
+            <h2>Storage Status</h2>
+            <span class="reclaimable-mini-pill" id="reclaimableBadge">0 B Reclaimable</span>
+          </div>
+
+          <!-- 4-Segment Horizontal Bar (System, Apps, Cache, Free) -->
+          <div class="segmented-bar-track" aria-label="Storage Usage Breakdown">
+            <div id="segSystem" class="seg-bar seg-system" style="width: 18%" title="System"></div>
+            <div id="segApps" class="seg-bar seg-apps" style="width: 28%" title="Apps"></div>
+            <div id="segCache" class="seg-bar seg-cache" style="width: 6%" title="Reclaimable Cache"></div>
+            <div id="segFree" class="seg-bar seg-free" style="width: 48%" title="Free Space"></div>
+          </div>
+
+          <!-- 2x2 Legend Grid matching the reference image -->
+          <div class="storage-legend-grid">
+            <div class="legend-item">
+              <span class="legend-dot dot-system"></span>
+              <span class="legend-text" id="legendSystemText">System (12 GB)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot dot-apps"></span>
+              <span class="legend-text" id="legendAppsText">Apps (18 GB)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot dot-cache"></span>
+              <span class="legend-text" id="legendCacheText">Cache (2.4 GB)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot dot-free"></span>
+              <span class="legend-text" id="legendFreeText">Free (31.6 GB)</span>
+            </div>
+          </div>
+
+          <!-- Subtle real-time telemetry footer inside card -->
+          <div class="storage-card-meta">
+            <span id="mountPathBadge">/storage/emulated/10</span>
+            <span>Total: <strong id="totalSpaceVal">-- GB</strong> • Free: <strong id="freeSpaceVal">-- GB</strong> (<span id="usagePercentText">0%</span> used)</span>
+          </div>
+          <!-- Hidden compatibility hooks -->
+          <span id="usedSpaceVal" class="sr-only"></span>
+          <span id="ramTotalVal" class="sr-only"></span>
+          <span id="ramAvailableVal" class="sr-only"></span>
+          <span id="ramCachedVal" class="sr-only"></span>
+          <span id="bgServicesCountVal" class="sr-only"></span>
+          <span id="orphanCountVal" class="sr-only"></span>
+          <span id="lastScannedText" class="sr-only"></span>
+          <div id="usageBarFill" class="sr-only"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Full-Width Frosted Dock Bar (15 Background Apps Active | Waveform | Settings Pill) -->
+    <footer class="bottom-dock-bar">
+      <button id="bgAppsDockBtn" class="dock-left-btn" title="Click to open or close active background apps &amp; settings">
+        <strong id="dockBgAppsCount">15</strong>&nbsp;<span>Background Apps Active</span>
+      </button>
+
+      <!-- Animated Center Equalizer / Activity Waveform -->
+      <div class="dock-waveform" id="dockWaveform" aria-hidden="true">
+        <span class="wave-bar w-purple" style="height: 6px"></span>
+        <span class="wave-bar w-purple" style="height: 10px"></span>
+        <span class="wave-bar w-purple" style="height: 7px"></span>
+        <span class="wave-bar w-purple" style="height: 13px"></span>
+        <span class="wave-bar w-blue" style="height: 9px"></span>
+        <span class="wave-bar w-blue" style="height: 16px"></span>
+        <span class="wave-bar w-cyan" style="height: 24px"></span>
+        <span class="wave-bar w-cyan" style="height: 18px"></span>
+        <span class="wave-bar w-cyan" style="height: 22px"></span>
+        <span class="wave-bar w-blue" style="height: 11px"></span>
+        <span class="wave-bar w-muted" style="height: 15px"></span>
+        <span class="wave-bar w-muted" style="height: 12px"></span>
+        <span class="wave-bar w-muted" style="height: 18px"></span>
+        <span class="wave-bar w-muted" style="height: 14px"></span>
+        <span class="wave-bar w-muted" style="height: 19px"></span>
+        <span class="wave-bar w-muted" style="height: 22px"></span>
+      </div>
+
+      <div class="dock-right-actions">
+        <button id="settingsToggleBtn" class="dock-settings-pill-btn" aria-expanded="false" title="Close all open settings &amp; guardrails or open settings">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span id="settingsBtnLabel">Settings</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- Google Gemini ("Ahri") & The Anti-Annoyance Strategy ("Smart Guard" Rules) Panel -->
+    <!-- Connected to the "✦ Ask Gemini" Pill Button; closed when "Settings" pill is clicked! -->
+    <section class="smart-guard-panel hidden" id="smartGuardSection">
+      <div class="smart-guard-header">
+        <div>
+          <div class="sg-title-line">
+            <span class="sg-sparkle">✦</span>
+            <h3>The Anti-Annoyance Strategy (&ldquo;Smart Guard&rdquo; Rules)</h3>
+            <span class="sg-model-chip">Ahri • Gemini 3.8 Flash</span>
+          </div>
+          <p class="card-subtitle">To keep Ahri helpful rather than irritating, we introduce three guardrails:</p>
+        </div>
+
+        <div class="sg-test-buttons">
+          <button id="simTransientBtn" class="btn-secondary btn-sm" title="Send 1 polling check at 85% RAM — proves transient 2s spike does NOT trigger notification">
+            1x Spike (85%)
+          </button>
+          <button id="simSustainedBtn" class="btn-secondary btn-sm" title="Send 3 consecutive polling checks >=82% (~18s) — triggers Quiet Heads-Up">
+            3x Sustained (&ge;82%)
+          </button>
+          <button id="simCriticalBtn" class="btn-secondary btn-sm" title="Send >92% critical danger spike — overrides 45-60m Cooldown!">
+            Critical (&gt;92%)
+          </button>
+          <button id="resetSmartGuardBtn" class="btn-secondary btn-sm" title="Reset Smart Guard cooldown and counters">
+            Reset Guard
+          </button>
+          <button id="closeSmartGuardBtn" class="btn-close-pill" title="Close Smart Guard &amp; All Settings">
+            ✕ Close
+          </button>
+        </div>
+      </div>
+
+      <!-- The 3 Numbered Smart Guard Guardrails (Exact Text from Reference Image) -->
+      <div class="smart-guard-rules-grid">
+        <div class="sg-rule-card">
+          <div class="sg-rule-top">
+            <strong>1. Cooldown Window</strong>
+            <span id="sgCooldownBadge" class="sg-status-badge">Ready (No Cooldown)</span>
+          </div>
+          <p class="sg-rule-desc">
+            Once Ahri suggests or triggers a purge, silence notifications for at least <strong>45 to 60 minutes</strong>, unless RAM spikes into a critical danger threshold (<strong>&gt;92%</strong>).
+          </p>
+        </div>
+
+        <div class="sg-rule-card">
+          <div class="sg-rule-top">
+            <strong>2. Sustained Pressure Check</strong>
+            <span id="sgSustainedBadge" class="sg-status-badge">0 / 3 Checks (&ge;82%)</span>
+          </div>
+          <p class="sg-rule-desc">
+            Don't trigger on a transient 2-second spike (like opening a heavy tab). Trigger only if RAM stays <strong>&ge; 82% for 3 consecutive polling checks (~15&ndash;20 seconds)</strong>.
+          </p>
+        </div>
+
+        <div class="sg-rule-card">
+          <div class="sg-rule-top">
+            <strong>3. Smart Notification Action</strong>
+            <span id="sgNotificationBadge" class="sg-status-badge">Quiet Heads-Up Idle</span>
+          </div>
+          <p class="sg-rule-desc">
+            Instead of forcing a blocking modal over your screen, send a <strong>quiet heads-up notification</strong> with a <strong>1-tap &ldquo;Purge Now&rdquo; action button</strong>.
+          </p>
+        </div>
+      </div>
+
+      <!-- Live Ahri (Gemini 3.8 Flash) Advisor Bar -->
+      <div class="ahri-advisor-bar">
+        <div class="ahri-message-box">
+          <span class="ahri-avatar">✦ Ahri:</span>
+          <span id="ahriAdviceText">Ahri Smart Guard is monitoring quietly. Transient spikes (&lt;3 checks) are ignored, and notifications respect a 50-minute cooldown unless RAM exceeds 92%.</span>
+        </div>
+        <div class="ahri-ask-controls">
+          <input type="text" id="ahriPromptInput" class="app-search-input" placeholder="Ask Ahri (Gemini 3.8 Flash) about RAM or guardrails..." />
+          <button id="askAhriBtn" class="btn-secondary btn-sm">Ask Gemini</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Expandable Advanced Settings, App Breakdown & Separate Media Detector Drawer -->
+    <div id="advancedDrawer" class="advanced-drawer hidden">
+      <div class="drawer-toolbar">
+        <div class="drawer-toolbar-left">
+          <span class="drawer-tag">8 One-Click Engines Active</span>
+          <span id="totalFilesBadge" class="drawer-subtag">0 items</span>
+          <span id="installedCountPill" class="drawer-subtag">11 Installed Apps</span>
+        </div>
+        <div class="drawer-toolbar-right">
+          <button id="seedCacheBtn" class="btn-secondary btn-sm">
+            + Seed Test Caches &amp; Duplicate Media
+          </button>
+          <button id="themeToggleBtn" class="btn-secondary btn-sm">Toggle Contrast</button>
+          <button id="closeAllSettingsBtn" class="btn-close-pill">✕ Close All Settings</button>
+        </div>
+      </div>
+
+      <!-- 8 One-Click Categories Grid -->
+      <section class="drawer-section">
+        <div class="drawer-section-header">
+          <div>
+            <h3>One-Click Purge &amp; Cache Scope (8 Combined Engines)</h3>
+            <p class="card-subtitle">Google Play Services, Browser, YouTube, Installed Apps, Orphan APKs, Background Service Trimmer &amp; <code>sudo purge</code> RAM Releaser</p>
+          </div>
+          <div class="cat-check-row">
+            <input type="checkbox" id="cleanBrowserStorageToggle" checked />
+            <label for="cleanBrowserStorageToggle">Purge Live WebStorage / CacheAPI (<span id="browserCacheStatusBadge">Ready</span>)</label>
+          </div>
+        </div>
+        <div id="categoriesList" class="categories-list"></div>
+      </section>
+
+      <!-- Installed Apps Breakdown -->
+      <section class="drawer-section">
+        <div class="drawer-section-header">
+          <div>
+            <h3>Installed Apps &amp; System Services Breakdown</h3>
+            <p class="card-subtitle">Individual package caches scanned across Google Book OS</p>
+          </div>
+          <div class="apps-controls">
+            <input type="search" id="appSearchInput" class="app-search-input" placeholder="Filter apps or packages..." />
+            <button id="selectAllAppsBtn" class="btn-secondary btn-sm">Select All</button>
+          </div>
+        </div>
+        <div id="installedAppsGrid" class="installed-apps-grid"></div>
+      </section>
+
+      <!-- Separate Manual Review Section: Large & Duplicate Media Detector -->
+      <section class="drawer-section media-detector-section">
+        <div class="drawer-section-header">
+          <div>
+            <div class="media-title-row">
+              <h3>Large &amp; Duplicate Media Detector</h3>
+              <span class="manual-review-badge">Excluded from One-Click • Manual Review Only</span>
+            </div>
+            <p class="card-subtitle">SHA-256 content-verified duplicate photos/videos (preserving originals) &amp; large media files (&ge; 1 MB)</p>
+          </div>
+          <div class="media-actions">
+            <span id="mediaReclaimableBadge" class="reclaimable-mini-pill">0 B Selected</span>
+            <button id="cleanMediaBtn" class="btn-danger">Remove Selected Duplicates &amp; Large Media</button>
+          </div>
+        </div>
+        <div id="mediaItemsList" class="media-items-grid"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

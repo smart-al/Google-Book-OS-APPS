@@ -1,0 +1,10 @@
+.gradle/
+**/build/intermediates/
+**/build/tmp/
+**/build/kotlin/
+**/build/generated/
+**/build/outputs/logs/
+local.properties
+*.iml
+__pycache__/
+*.pyc

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Deep matte navy background matching Google Book Purge UI (#192030) -->
+    <path
+        android:fillColor="#192030"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Subtle inner ambient glow circle -->
+    <path
+        android:fillColor="#222B40"
+        android:pathData="M54,14A40,40 0 1,1 53.9,14Z" />
+</vector>
