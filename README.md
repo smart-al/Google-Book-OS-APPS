@@ -1,12 +1,33 @@
-# Google Book Purge `Lite` (`v2.2.0`)
+# 💻 Google Book OS Applications Suite
 
-Lightweight One-Click Cache Storage Cleaner, Background Service Trimmer, `sudo purge` RAM Releaser, and **Google Gemini (`gemini-3.8-flash` / "Ahri" Smart Guard)** Optimizer for Google Book OS laptops.
+A curated suite of native and web applications built and optimized specifically for **Google Book OS** (16:10 large-screen laptops, desktop windows, and convertible tablets).
 
-## Included Components
-- **`web/`** — Zero-bloat Python 3 Web Application (`http://127.0.0.1:8765`) with 260° Neon RAM Arc Gauge, 4-Segment Storage Status card, 8 combined One-Click engines, separate SHA-256 Large & Duplicate Media Detector, and Ahri (`gemini-3.8-flash`) Smart Guard rules.
-- **`android/`** — Native Android Application (`com.droid.cachecleaner`, `versionCode = 6`, `versionName = "2.2.0"`) built with Kotlin & Jetpack Compose Material 3, MVVM + Constructor DI + `StoragePlatformBridge` Factory pattern, and 14/14 automated unit, Robolectric, and Compose UI tests (`82.88%` line coverage, Audit Score `93.1/100`).
+---
 
-## Smart Guard ("Anti-Annoyance Strategy") Rules
-1. **Cooldown Window (45–60 min)**: Silences notifications for 50 minutes after a purge or suggestion unless RAM spikes into critical danger (`>92%`).
-2. **Sustained Pressure Check (≥82% for 3 consecutive checks, ~15–20s)**: Ignores transient 2-second spikes and only triggers on sustained RAM pressure.
-3. **Smart Notification Action**: Dispatches a quiet heads-up notification with a 1-tap **"Purge Now"** action button instead of a blocking modal.
+## 📱 Applications in this Repository
+
+### 1. 💧 [LiquidGlass3D (`LiquidGlass3D/`)](LiquidGlass3D/README.md)
+**2D-to-3D Spatial Live Wallpaper & Liquid Glass Widget Engine**
+- **Android 17 (API 37)** Kotlin + Jetpack Compose Material 3 live wallpaper powered by **Android AGSL (`RuntimeShader`)**.
+- **Tri-Model On-Device AI Pipeline (LiteRT)**:
+  - *Depth Anything V2 Small* for monocular depth estimation and 3D ray-displacement (`depth - 0.35`).
+  - *MediaPipe Selfie Multiclass* for portrait semantic segmentation (`hair`, `face`, `body`, `clothes`).
+  - *U²-Net (FP16)* for general salient-object segmentation (pets, vehicles, nature, products).
+- **Interactive Liquid Glass Clock**:
+  - Movable anywhere across the desktop screen via direct **mouse dragging** or precision sliders.
+  - **Adaptive Image Color Blending**: Frosted glass panel dynamically absorbs and reflects ambient colors from the underlying photo.
+  - **Depth Layer Occlusion**: Toggle the clock between sitting **Behind Subject** (3D depth-occluded) or **In Front of Subject** (floating glass).
+  - **36 Color Themes**: 8 solid glass tones + 28 multi-stop liquid gradients (*Cyberpunk, Solar Flare, Aurora, Prism Spectrum, Bioluminescent Abyss, etc.*).
+- **16:10 Standard Aspect Ratio**: Optimized for Google Book laptop displays with dual-pane layout, mouse hover parallax, and hardware gyroscope tilt.
+
+---
+
+### 2. ⚡ [Google Book Purge `Lite` (`android/` & `web/`)](README.md)
+**One-Click Cache Storage Cleaner & Memory Optimizer**
+- **`web/`**: Zero-bloat Python 3 Web Application (`http://127.0.0.1:8765`) with 260° Neon RAM Arc Gauge, 4-Segment Storage Status, 8 One-Click purge engines, and large/duplicate media detector.
+- **`android/`**: Native Android app (`com.droid.cachecleaner`, `versionName = "2.2.0"`) with MVVM, Robolectric/Compose tests (`82.88%` coverage, Audit Score `93.1/100`), and Gemini Smart Guard rules.
+
+---
+
+## 📄 License
+Licensed under the Apache License, Version 2.0. See [LICENSE](LiquidGlass3D/LICENSE) for details.

@@ -1,0 +1,150 @@
+// LiquidGlassShader.agsl — Android AGSL (RuntimeShader)
+//
+// All child shaders are sampled in *pixel* coordinates and have been pre-scaled
+// (cover-crop) to the surface size by LiquidGlassRenderer, so a pixel in
+// `photo`, `depthTex` and `maskTex` all line up with `frag`.
+//
+//   photo    : RGB source image
+//   depthTex : R = depth (1 = near, 0 = far)
+//   maskTex  : R = foreground subject mask (1 = subject)
+//   clockTex : premultiplied RGBA clock text, panel-sized (origin = panel.xy)
+
+uniform shader photo;
+uniform shader depthTex;
+uniform shader maskTex;
+uniform shader clockTex;
+
+uniform float2 res;            // surface size in px
+uniform float2 tilt;           // smoothed parallax input, -1..1
+uniform float  depthIntensity; // 0..1.5
+uniform float  refraction;     // 0..1.5 liquid-glass strength
+uniform float  spatial;        // 1 = 3D Spatial Mode on, 0 = flat
+uniform float  time;           // seconds
+uniform float4 panel;          // glass panel: x, y, w, h (px)
+uniform float  clockInFront;   // 0 = behind subject, 1 = floating in front
+uniform float  glassBlend;     // 0 = seamless image blend, 1 = frosted glass
+
+const float ZERO_PLANE = 0.35;  // depth value that stays "on screen"
+
+float2 clampP(float2 p) { return clamp(p, float2(0.5), res - 0.5); }
+float  depthAt(float2 p) { return depthTex.eval(clampP(p)).r; }
+float  maskAt(float2 p)  { return maskTex.eval(clampP(p)).r; }
+half3  photoAt(float2 p) { return photo.eval(clampP(p)).rgb; }
+
+float sdRoundBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 main(float2 frag) {
+    float unit = res.y / 1000.0;               // resolution-independent pixel unit
+    float2 center = res * 0.5;
+
+    // ---- 1. Depth-driven UV displacement (depth - 0.35) ------------------
+    float zoom = 1.0 + 0.07 * depthIntensity * spatial;     // hide revealed borders
+    float2 base = (frag - center) / zoom + center;
+    float reach = res.y * 0.055 * depthIntensity * spatial;
+    float2 off = float2(tilt.x, tilt.y);
+
+    // Iterative parallax mapping: re-read depth at the displaced coordinate so
+    // foreground subjects "pop" forward and backgrounds recess without tearing.
+    float2 p = base;
+    float d = depthAt(p);
+    for (int i = 0; i < 4; i++) {
+        p = base + off * (d - ZERO_PLANE) * reach;
+        d = depthAt(p);
+    }
+    p = clampP(p);
+
+    // ---- 2. Foreground edge + surface normal -----------------------------
+    float e = 3.0 * unit + 1.0;
+    float mx = maskAt(p + float2(e, 0)) - maskAt(p - float2(e, 0));
+    float my = maskAt(p + float2(0, e)) - maskAt(p - float2(0, e));
+    float2 g = float2(mx, my);
+    float edge = clamp(length(g) * 1.2, 0.0, 1.0);
+    float2 edgeDir = g / max(length(g), 1e-4);
+
+    float dx = depthAt(p + float2(e, 0)) - depthAt(p - float2(e, 0));
+    float dy = depthAt(p + float2(0, e)) - depthAt(p - float2(0, e));
+    float3 n = normalize(float3(-dx * 6.0, -dy * 6.0, 1.0));
+
+    // ---- 3. Chromatic dispersion along foreground edges ------------------
+    float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
+    half3 col;
+    col.r = photoAt(p + edgeDir * disp).r;
+    col.g = photoAt(p).g;
+    col.b = photoAt(p - edgeDir * disp).b;
+
+    // ---- 4. Dynamic specular sheen on the subject ------------------------
+    float3 L = normalize(float3(-tilt.x * 0.9 + 0.25 * sin(time * 0.4),
+                                -tilt.y * 0.9 - 0.35, 0.65));
+    float3 H = normalize(L + float3(0, 0, 1));
+    float spec = pow(max(dot(n, H), 0.0), 36.0);
+    float fgSoft = smoothstep(0.35, 0.65, maskAt(p));
+    float sheen = spec * refraction * (0.35 + 1.6 * edge + 0.5 * fgSoft);
+    float rim = edge * refraction * 0.18 * (0.5 + 0.5 * dot(normalize(edgeDir + 1e-4), L.xy));
+    col += half3(sheen + rim);
+
+    // ---- 5. Frosted Liquid-Glass panel (sandwiched behind the subject) ----
+    float2 pc = panel.xy + panel.zw * 0.5 + tilt * 5.0 * unit * spatial;
+    float2 local = frag - pc;
+    float radius = min(panel.z, panel.w) * 0.32;
+    float sd = sdRoundBox(local, panel.zw * 0.5, radius);
+    float inside = 1.0 - smoothstep(-1.5, 0.75, sd);
+
+    half3 result = col;
+    if (inside > 0.0 || sd < 40.0 * unit) {
+        // Lens refraction: pixels near the rim bend inward like a liquid bead.
+        float lens = smoothstep(-34.0 * unit, 0.0, sd);
+        float2 dir = local / max(length(local), 1.0);
+        float2 q = p - dir * lens * refraction * 26.0 * unit;
+
+        // Frosted blur (golden-angle disc kernel)
+        half3 blur = half3(0);
+        float rad = (10.0 + 6.0 * refraction) * unit;
+        for (int i = 0; i < 12; i++) {
+            float a = float(i) * 2.39996;
+            float r = sqrt((float(i) + 0.5) / 12.0) * rad;
+            blur += photoAt(q + float2(cos(a), sin(a)) * r);
+        }
+        blur /= 12.0;
+
+        // Chromatic split on the lens rim
+        float cd = lens * refraction * 5.0 * unit;
+        blur.r = mix(blur.r, photoAt(q + dir * cd).r, 0.6);
+        blur.b = mix(blur.b, photoAt(q - dir * cd).b, 0.6);
+
+        // Blend frosted blur with the actual image colors under the clock
+        half3 imageUnder = photoAt(p);
+        half3 ambientTint = photoAt(pc);
+        half3 glass = mix(imageUnder, blur, half(0.25 + 0.65 * glassBlend));
+        glass = mix(glass, glass * (ambientTint * 0.75 + 0.35), half(0.28));
+
+        // Specular rim highlight (brighter toward the light)
+        float rimBand = smoothstep(-3.0 * unit, 0.0, sd) * (1.0 - smoothstep(0.0, 1.5 * unit, sd));
+        float facing = 0.5 + 0.5 * dot(dir, normalize(L.xy + 1e-4));
+        glass += half3(rimBand * (0.35 + 0.65 * facing) * (0.5 + 0.5 * refraction));
+
+        // Inner top sheen
+        float topSheen = smoothstep(0.0, -panel.w * 0.5, local.y) * 0.06 * (0.4 + 0.6 * glassBlend);
+        glass += half3(topSheen);
+
+        // Clock text living on the glass
+        float2 tp = frag - panel.xy;
+        if (tp.x >= 0.0 && tp.y >= 0.0 && tp.x < panel.z && tp.y < panel.w) {
+            half4 c = clockTex.eval(tp);
+            glass = glass * (1.0 - c.a) + c.rgb;
+        }
+
+        // Dissolve glass panel seamlessly into image
+        float panelAlpha = inside * (0.35 + 0.65 * glassBlend);
+        result = mix(col, glass, half(panelAlpha));
+    }
+
+    // ---- 6. Depth occlusion: the subject sits in front of the glass -------
+    float fg = smoothstep(0.45, 0.55, maskAt(p));
+    float inFront = step(ZERO_PLANE, d) * (1.0 - clockInFront);            // only truly-near pixels occlude
+    result = mix(result, col, half(fg * inFront));
+
+    return half4(result, 1.0);
+}

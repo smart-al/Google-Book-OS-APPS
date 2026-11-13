@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">LiquidGlass3D</string>
+    <string name="wallpaper_label">Liquid Glass 3D</string>
+    <string name="wallpaper_description">Depth-aware 3D parallax wallpaper with a Liquid Glass clock.</string>
+</resources>
