@@ -78,43 +78,59 @@ half4 main(float2 frag) {
     float2 uv = p / max(res, float2(1.0));
     float2 bgDelta = float2(0.0);
     float bgShimmer = 0.0;
-
-    if (bgMask > 0.001) {
-        if (livingMode < 0.5) {
-            // Mode 0: Clouds & Sky — smooth billowing drift in upper/far depth
-            float skyZone = smoothstep(0.90, 0.10, uv.y) * (1.0 - smoothstep(0.35, 0.85, d));
-            float driftX = sin(uv.y * 8.0 + time * 0.45) * 9.0 + cos(uv.x * 5.0 - time * 0.30) * 5.0;
-            float driftY = cos(uv.x * 6.0 + time * 0.35) * 3.0;
-            bgDelta = float2(driftX, driftY) * unit * skyZone * bgMask;
-            bgShimmer = max(0.0, sin(uv.x * 9.0 - time * 0.40 + uv.y * 5.0)) * 0.025 * skyZone * bgMask;
-        } else if (livingMode < 1.5) {
-            // Mode 1: Ocean & Water — directional wave ripples + sunlight glints
-            float waterZone = smoothstep(0.28, 0.72, uv.y);
-            float w1 = sin(uv.y * 42.0 - time * 2.2 + uv.x * 12.0);
-            float w2 = cos(uv.y * 27.0 + time * 1.6 - uv.x * 18.0);
-            bgDelta = float2((w1 * 5.5 + w2 * 3.0) * unit, (w1 * 2.2 - w2 * 1.5) * unit) * waterZone * bgMask;
-            bgShimmer = pow(max(0.0, w1 * 0.5 + w2 * 0.5), 4.0) * 0.065 * waterZone * bgMask;
-        } else if (livingMode < 2.5) {
-            // Mode 2: Nature Breeze — organic wind gusts across foliage & landscape
-            float gust = sin(uv.x * 14.0 + uv.y * 9.0 - time * 1.5) * 0.65
-                       + cos(uv.x * 7.0 - uv.y * 11.0 + time * 1.1) * 0.35;
-            bgDelta = float2(gust * 7.0 * unit, sin(uv.x * 10.0 + time * 1.2) * 2.5 * unit) * bgMask;
-        } else {
-            // Mode 3: Living Aura — gentle ambient breath + floating bokeh motes
-            float breath = sin(time * 0.9 + uv.y * 4.0) * 3.0 * unit;
-            bgDelta = float2(breath * cos(uv.x * 5.0), breath * 0.6) * bgMask;
-            float2 cell = fract(uv * float2(10.0, 6.25) + float2(time * 0.04, -time * 0.06)) - 0.5;
-            float mote = smoothstep(0.22, 0.02, length(cell));
-            bgShimmer = mote * 0.06 * (0.5 + 0.5 * sin(time * 1.7 + uv.x * 20.0)) * bgMask;
-        }
-    }
-
-    float2 pCol = clampP(p + bgDelta);
-    float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
     half3 col;
-    col.r = photoAt(pCol + edgeDir * disp).r;
-    col.g = photoAt(pCol).g;
-    col.b = photoAt(pCol - edgeDir * disp).b;
+
+    if (bgMask > 0.001 && livingMode < 0.5) {
+        // Mode 0: Clouds & Sky — dual-phase continuous flow advection so clouds visibly drift
+        float skyZone = smoothstep(0.88, 0.18, uv.y) * bgMask;
+        float flowSpeed = 0.18;
+        float p0 = fract(time * flowSpeed);
+        float p1 = fract(time * flowSpeed + 0.5);
+        float blendW = abs(2.0 * p0 - 1.0);
+        float travel = 95.0 * unit * skyZone;
+        float billow = sin(uv.y * 10.0 + time * 0.8) * 10.0 * unit * skyZone;
+
+        float2 off0 = float2((p0 - 0.5) * travel, billow * (1.0 - p0));
+        float2 off1 = float2((p1 - 0.5) * travel, billow * (1.0 - p1));
+        half3 c0 = photoAt(p - off0);
+        half3 c1 = photoAt(p - off1);
+        half3 cloudFlow = mix(c0, c1, half(blendW));
+
+        float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
+        col.r = mix(photoAt(p + edgeDir * disp).r, cloudFlow.r, half(skyZone));
+        col.g = mix(photoAt(p).g, cloudFlow.g, half(skyZone));
+        col.b = mix(photoAt(p - edgeDir * disp).b, cloudFlow.b, half(skyZone));
+        bgShimmer = max(0.0, sin(uv.x * 8.0 - time * 0.9 + uv.y * 4.0)) * 0.03 * skyZone;
+    } else {
+        if (bgMask > 0.001) {
+            if (livingMode < 1.5) {
+                // Mode 1: Ocean & Water — visible directional wave ripples + sunlight glints
+                float waterZone = smoothstep(0.25, 0.70, uv.y);
+                float w1 = sin(uv.y * 38.0 - time * 2.6 + uv.x * 11.0);
+                float w2 = cos(uv.y * 24.0 + time * 1.9 - uv.x * 16.0);
+                bgDelta = float2((w1 * 11.0 + w2 * 6.0) * unit, (w1 * 4.5 - w2 * 3.0) * unit) * waterZone * bgMask;
+                bgShimmer = pow(max(0.0, w1 * 0.5 + w2 * 0.5), 3.0) * 0.09 * waterZone * bgMask;
+            } else if (livingMode < 2.5) {
+                // Mode 2: Nature Breeze — organic wind gusts across foliage & landscape
+                float gust = sin(uv.x * 14.0 + uv.y * 9.0 - time * 1.8) * 0.65
+                           + cos(uv.x * 7.0 - uv.y * 11.0 + time * 1.3) * 0.35;
+                bgDelta = float2(gust * 14.0 * unit, sin(uv.x * 10.0 + time * 1.4) * 5.0 * unit) * bgMask;
+            } else {
+                // Mode 3: Living Aura — gentle ambient breath + floating bokeh motes
+                float breath = sin(time * 1.1 + uv.y * 4.0) * 6.0 * unit;
+                bgDelta = float2(breath * cos(uv.x * 5.0), breath * 0.7) * bgMask;
+                float2 cell = fract(uv * float2(10.0, 6.25) + float2(time * 0.06, -time * 0.09)) - 0.5;
+                float mote = smoothstep(0.24, 0.02, length(cell));
+                bgShimmer = mote * 0.09 * (0.5 + 0.5 * sin(time * 2.0 + uv.x * 20.0)) * bgMask;
+            }
+        }
+
+        float2 pCol = clampP(p + bgDelta);
+        float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
+        col.r = photoAt(pCol + edgeDir * disp).r;
+        col.g = photoAt(pCol).g;
+        col.b = photoAt(pCol - edgeDir * disp).b;
+    }
 
     // ---- 4. Dynamic specular sheen on the subject ------------------------
     float3 L = normalize(float3(-tilt.x * 0.9 + 0.25 * sin(time * 0.4),
