@@ -128,6 +128,7 @@ object SceneStore {
     const val KEY_MIXED_COLOR_A = "mixed_color_a"
     const val KEY_MIXED_COLOR_B = "mixed_color_b"
     const val KEY_MIX_WEIGHT = "mix_weight"
+    const val KEY_GEMINI_API_KEY = "gemini_api_key"
 
     const val SOURCE_FILE = "source.jpg"
     const val DEPTH_FILE = "depth.png"
@@ -269,6 +270,13 @@ object SceneStore {
     fun bumpSceneVersion(context: Context) {
         val p = prefs(context)
         p.edit().putLong(KEY_SCENE_VERSION, p.getLong(KEY_SCENE_VERSION, 0) + 1).apply()
+    }
+
+    fun loadGeminiApiKey(context: Context): String =
+        prefs(context).getString(KEY_GEMINI_API_KEY, "")?.trim().orEmpty()
+
+    fun saveGeminiApiKey(context: Context, key: String) {
+        prefs(context).edit().putString(KEY_GEMINI_API_KEY, key.trim()).apply()
     }
 }
 

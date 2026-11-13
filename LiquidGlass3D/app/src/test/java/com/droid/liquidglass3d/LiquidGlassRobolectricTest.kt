@@ -318,4 +318,29 @@ class LiquidGlassRobolectricTest {
         assertEquals(defaults.clockFont, loaded.clockFont)
         assertEquals(defaults.clockColorPreset, loaded.clockColorPreset)
     }
+
+    @Test
+    fun testGeminiApiKeyPersistence() {
+        assertEquals("", SceneStore.loadGeminiApiKey(context))
+        SceneStore.saveGeminiApiKey(context, "  test-key-123  ")
+        assertEquals("test-key-123", SceneStore.loadGeminiApiKey(context))
+    }
+
+    @Test
+    fun testNanoBananaExpanderHelpers() {
+        assertFalse(NanoBananaExpander.needsExpansionTo16x10(2560, 1600))
+        assertTrue(NanoBananaExpander.needsExpansionTo16x10(1080, 1920))
+        assertTrue(NanoBananaExpander.needsExpansionTo16x10(800, 500))
+        assertFalse(NanoBananaExpander.needsExpansionTo16x10(0, 100))
+
+        val req = NanoBananaExpander.buildOutpaintRequestJson("AQID", "Expand beach borders")
+        assertTrue(req.contains("Expand beach borders"))
+        assertTrue(req.contains("16:10"))
+        assertTrue(req.contains("AQID"))
+
+        val okResponse = """
+            {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"BASE64_IMG"}}]}}]}
+        """.trimIndent()
+        assertEquals("BASE64_IMG", NanoBananaExpander.extractImageBase64FromResponse(okResponse))
+    }
 }

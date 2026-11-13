@@ -53,6 +53,12 @@ class DepthEstimator(
         withContext(Dispatchers.Default) {
             onStage("Decoding image…")
             val photo = decode(uri)
+            processBitmap(photo, onStage)
+        }
+
+    /** Runs the full AI depth + segmentation pipeline on an already-decoded [photo] and caches results. */
+    suspend fun processBitmap(photo: Bitmap, onStage: (String) -> Unit = {}): SceneBitmaps =
+        withContext(Dispatchers.Default) {
             val w = photo.width
             val h = photo.height
 

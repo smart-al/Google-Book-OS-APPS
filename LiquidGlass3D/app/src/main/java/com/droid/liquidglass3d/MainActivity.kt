@@ -53,6 +53,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -80,6 +81,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -101,10 +103,16 @@ data class UiState(
     val sceneVersion: Int = 0,
     val busyStage: String? = null,
     val error: String? = null,
+    val geminiApiKey: String = "",
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
-    private val _state = MutableStateFlow(UiState(settings = SceneStore.loadSettings(app)))
+    private val _state = MutableStateFlow(
+        UiState(
+            settings = SceneStore.loadSettings(app),
+            geminiApiKey = SceneStore.loadGeminiApiKey(app),
+        )
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
     private val estimator = DepthEstimator(app)
 
@@ -144,6 +152,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val scene = estimator.process(uri) { stage -> _state.update { it.copy(busyStage = stage) } }
+                _state.update { it.copy(scene = scene, sceneVersion = it.sceneVersion + 1, busyStage = null) }
+            } catch (e: Exception) {
+                _state.update { it.copy(busyStage = null, error = e.message ?: e.javaClass.simpleName) }
+            }
+        }
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        val trimmed = key.trim()
+        SceneStore.saveGeminiApiKey(getApplication(), trimmed)
+        _state.update { it.copy(geminiApiKey = trimmed) }
+    }
+
+    fun expandSceneWithNanoBanana(apiKey: String, prompt: String) {
+        if (_state.value.busyStage != null) return
+        val currentPhoto = _state.value.scene?.photo ?: return
+        saveGeminiApiKey(apiKey)
+        _state.update { it.copy(busyStage = "Expanding image to 16:10 with Nano Banana…", error = null) }
+        viewModelScope.launch {
+            try {
+                val expanded = NanoBananaExpander.expandTo16x10(apiKey, currentPhoto, prompt)
+                val scene = estimator.processBitmap(expanded) { stage -> _state.update { it.copy(busyStage = stage) } }
                 _state.update { it.copy(scene = scene, sceneVersion = it.sceneVersion + 1, busyStage = null) }
             } catch (e: Exception) {
                 _state.update { it.copy(busyStage = null, error = e.message ?: e.javaClass.simpleName) }
@@ -599,6 +629,30 @@ private fun ControlsPane(
                     Text("Sample Scene")
                 }
             }
+            var showExpandDialog by remember { mutableStateOf(false) }
+            val needsExpand = ui.scene?.photo?.let {
+                NanoBananaExpander.needsExpansionTo16x10(it.width, it.height)
+            } == true
+            OutlinedButton(
+                onClick = { showExpandDialog = true },
+                enabled = ui.scene != null && ui.busyStage == null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (needsExpand) "AI Expand to 16:10 (Nano Banana 2.1 · Recommended)"
+                    else "AI Expand / Edit Borders (Nano Banana 2.1)",
+                )
+            }
+            if (showExpandDialog) {
+                NanoBananaExpandDialog(
+                    initialApiKey = ui.geminiApiKey,
+                    onDismiss = { showExpandDialog = false },
+                    onConfirm = { key, prompt ->
+                        showExpandDialog = false
+                        vm.expandSceneWithNanoBanana(key, prompt)
+                    },
+                )
+            }
             Button(onClick = onSetWallpaper, enabled = ui.scene != null && ui.busyStage == null, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Wallpaper, null)
                 Spacer(Modifier.padding(4.dp))
@@ -701,4 +755,56 @@ private fun LabeledSlider(
         }
         Slider(value = value, onValueChange = onChange, valueRange = range, enabled = enabled)
     }
+}
+
+@Composable
+private fun NanoBananaExpandDialog(
+    initialApiKey: String,
+    onDismiss: () -> Unit,
+    onConfirm: (apiKey: String, prompt: String) -> Unit,
+) {
+    var apiKey by remember(initialApiKey) { mutableStateOf(initialApiKey) }
+    var prompt by remember { mutableStateOf(NanoBananaExpander.DEFAULT_OUTPAINT_PROMPT) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("AI Expand to 16:10 (Nano Banana 2.1)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Seamlessly outpaint borders (e.g. more beach, sky, or scenery) so smaller or portrait photos fit Google Book OS 16:10 without stretching or cropping.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("Gemini API Key (saved locally on device)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    label = { Text("Editable Outpaint Prompt") },
+                    minLines = 3,
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(apiKey, prompt) },
+                enabled = apiKey.isNotBlank(),
+            ) {
+                Text("Expand to 16:10")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
