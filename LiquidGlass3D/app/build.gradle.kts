@@ -19,6 +19,9 @@ android {
   }
 
   buildTypes {
+    debug {
+      enableUnitTestCoverage = true
+    }
     release {
       isMinifyEnabled = false
     }
@@ -47,4 +50,5 @@ dependencies {
   implementation(libs.androidx.compose.material.icons)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.litert)
+  testImplementation(libs.junit)
 }
