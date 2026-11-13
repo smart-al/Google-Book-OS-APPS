@@ -43,6 +43,9 @@ class LiquidGlassRobolectricTest {
             mixedColorA = 0xFFE53935.toInt(),
             mixedColorB = 0xFF00F5D4.toInt(),
             mixWeight = 0.5f,
+            livingBackgroundEnabled = false,
+            livingMotionMode = LivingMotionMode.OCEAN,
+            livingMotionIntensity = 1.15f,
         )
 
         SceneStore.saveSettings(context, updated)
@@ -64,6 +67,9 @@ class LiquidGlassRobolectricTest {
         assertEquals(updated.mixedColorA, loaded.mixedColorA)
         assertEquals(updated.mixedColorB, loaded.mixedColorB)
         assertEquals(updated.mixWeight, loaded.mixWeight, 0.001f)
+        assertEquals(updated.livingBackgroundEnabled, loaded.livingBackgroundEnabled)
+        assertEquals(updated.livingMotionMode, loaded.livingMotionMode)
+        assertEquals(updated.livingMotionIntensity, loaded.livingMotionIntensity, 0.001f)
     }
 
     @Test
@@ -74,6 +80,9 @@ class LiquidGlassRobolectricTest {
 
         SceneStore.saveDetectedMode(context, MaskMode.PORTRAIT)
         assertEquals(MaskMode.PORTRAIT, SceneStore.loadDetectedMode(context))
+
+        SceneStore.saveDetectedMotion(context, LivingMotionMode.OCEAN)
+        assertEquals(LivingMotionMode.OCEAN, SceneStore.loadDetectedMotion(context))
     }
 
     @Test

@@ -20,7 +20,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** Cover-cropped, surface-sized copies of the scene bitmaps (built off the main thread). */
-class PreparedScene(val photo: Bitmap, val depth: Bitmap, val mask: Bitmap, val width: Int, val height: Int)
+class PreparedScene(
+    val photo: Bitmap,
+    val depth: Bitmap,
+    val mask: Bitmap,
+    val width: Int,
+    val height: Int,
+    val detectedMotion: LivingMotionMode = LivingMotionMode.AURA,
+)
 
 /**
  * Shared AGSL renderer used by BOTH the wallpaper engine and the Compose live preview.
@@ -37,6 +44,7 @@ class LiquidGlassRenderer(context: Context) {
     private var surfaceW = 0
     private var surfaceH = 0
     private var sceneReady = false
+    private var detectedMotion = LivingMotionMode.AURA
 
     // Clock layer (sandwiched between background and foreground or floating in front)
     private var clockBitmap: Bitmap? = null
@@ -70,11 +78,19 @@ class LiquidGlassRenderer(context: Context) {
 
     /** Heavy part: safe on Dispatchers.Default. */
     fun prepare(scene: SceneBitmaps, w: Int, h: Int): PreparedScene =
-        PreparedScene(coverCrop(scene.photo, w, h), coverCrop(scene.depth, w, h), coverCrop(scene.mask, w, h), w, h)
+        PreparedScene(
+            coverCrop(scene.photo, w, h),
+            coverCrop(scene.depth, w, h),
+            coverCrop(scene.mask, w, h),
+            w,
+            h,
+            scene.detectedMotion,
+        )
 
     /** Cheap part: call on the render thread. */
     fun apply(p: PreparedScene) {
         surfaceW = p.width; surfaceH = p.height
+        detectedMotion = p.detectedMotion
         shader.setInputShader("photo", clampShader(p.photo))
         shader.setInputShader("depthTex", clampShader(p.depth))
         shader.setInputShader("maskTex", clampShader(p.mask))
@@ -178,6 +194,10 @@ class LiquidGlassRenderer(context: Context) {
         shader.setFloatUniform("glassBlend", settings.glassBlend.coerceIn(0f, 1f))
         val baseColor = GlassColorOps.effectiveGlassTint(settings)
         shader.setFloatUniform("baseColor", baseColor[0], baseColor[1], baseColor[2], baseColor[3])
+        val effectiveMotion = LivingMotionOps.resolveEffectiveMode(settings.livingMotionMode, detectedMotion)
+        shader.setFloatUniform("livingEnabled", if (settings.livingBackgroundEnabled) 1f else 0f)
+        shader.setFloatUniform("livingMode", effectiveMotion.shaderIndex)
+        shader.setFloatUniform("livingIntensity", settings.livingMotionIntensity.coerceIn(0f, 1.5f))
 
         canvas.drawRect(0f, 0f, surfaceW.toFloat(), surfaceH.toFloat(), paint)
     }

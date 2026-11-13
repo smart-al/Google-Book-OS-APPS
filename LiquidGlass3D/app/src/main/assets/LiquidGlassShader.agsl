@@ -24,6 +24,9 @@ uniform float4 panel;          // glass panel: x, y, w, h (px)
 uniform float  clockInFront;   // 0 = behind subject, 1 = floating in front
 uniform float  glassBlend;     // 0 = seamless image blend, 1 = frosted glass
 uniform float4 baseColor; // RGBA tint for glass panel
+uniform float  livingEnabled;  // 1 = animate background, 0 = static
+uniform float  livingMode;     // 0 = Clouds, 1 = Ocean, 2 = Breeze, 3 = Aura
+uniform float  livingIntensity;// 0..1.5
 
 const float ZERO_PLANE = 0.35;  // depth value that stays "on screen"
 
@@ -69,22 +72,58 @@ half4 main(float2 frag) {
     float dy = depthAt(p + float2(0, e)) - depthAt(p - float2(0, e));
     float3 n = normalize(float3(-dx * 6.0, -dy * 6.0, 1.0));
 
-    // ---- 3. Chromatic dispersion along foreground edges ------------------
+    // ---- 3. Chromatic dispersion + Living Background animation ----------
+    float fgSoft = smoothstep(0.25, 0.65, maskAt(p));
+    float bgMask = (1.0 - fgSoft) * livingEnabled * livingIntensity;
+    float2 uv = p / max(res, float2(1.0));
+    float2 bgDelta = float2(0.0);
+    float bgShimmer = 0.0;
+
+    if (bgMask > 0.001) {
+        if (livingMode < 0.5) {
+            // Mode 0: Clouds & Sky — smooth billowing drift in upper/far depth
+            float skyZone = smoothstep(0.90, 0.10, uv.y) * (1.0 - smoothstep(0.35, 0.85, d));
+            float driftX = sin(uv.y * 8.0 + time * 0.45) * 9.0 + cos(uv.x * 5.0 - time * 0.30) * 5.0;
+            float driftY = cos(uv.x * 6.0 + time * 0.35) * 3.0;
+            bgDelta = float2(driftX, driftY) * unit * skyZone * bgMask;
+            bgShimmer = max(0.0, sin(uv.x * 9.0 - time * 0.40 + uv.y * 5.0)) * 0.025 * skyZone * bgMask;
+        } else if (livingMode < 1.5) {
+            // Mode 1: Ocean & Water — directional wave ripples + sunlight glints
+            float waterZone = smoothstep(0.28, 0.72, uv.y);
+            float w1 = sin(uv.y * 42.0 - time * 2.2 + uv.x * 12.0);
+            float w2 = cos(uv.y * 27.0 + time * 1.6 - uv.x * 18.0);
+            bgDelta = float2((w1 * 5.5 + w2 * 3.0) * unit, (w1 * 2.2 - w2 * 1.5) * unit) * waterZone * bgMask;
+            bgShimmer = pow(max(0.0, w1 * 0.5 + w2 * 0.5), 4.0) * 0.065 * waterZone * bgMask;
+        } else if (livingMode < 2.5) {
+            // Mode 2: Nature Breeze — organic wind gusts across foliage & landscape
+            float gust = sin(uv.x * 14.0 + uv.y * 9.0 - time * 1.5) * 0.65
+                       + cos(uv.x * 7.0 - uv.y * 11.0 + time * 1.1) * 0.35;
+            bgDelta = float2(gust * 7.0 * unit, sin(uv.x * 10.0 + time * 1.2) * 2.5 * unit) * bgMask;
+        } else {
+            // Mode 3: Living Aura — gentle ambient breath + floating bokeh motes
+            float breath = sin(time * 0.9 + uv.y * 4.0) * 3.0 * unit;
+            bgDelta = float2(breath * cos(uv.x * 5.0), breath * 0.6) * bgMask;
+            float2 cell = fract(uv * float2(10.0, 6.25) + float2(time * 0.04, -time * 0.06)) - 0.5;
+            float mote = smoothstep(0.22, 0.02, length(cell));
+            bgShimmer = mote * 0.06 * (0.5 + 0.5 * sin(time * 1.7 + uv.x * 20.0)) * bgMask;
+        }
+    }
+
+    float2 pCol = clampP(p + bgDelta);
     float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
     half3 col;
-    col.r = photoAt(p + edgeDir * disp).r;
-    col.g = photoAt(p).g;
-    col.b = photoAt(p - edgeDir * disp).b;
+    col.r = photoAt(pCol + edgeDir * disp).r;
+    col.g = photoAt(pCol).g;
+    col.b = photoAt(pCol - edgeDir * disp).b;
 
     // ---- 4. Dynamic specular sheen on the subject ------------------------
     float3 L = normalize(float3(-tilt.x * 0.9 + 0.25 * sin(time * 0.4),
                                 -tilt.y * 0.9 - 0.35, 0.65));
     float3 H = normalize(L + float3(0, 0, 1));
     float spec = pow(max(dot(n, H), 0.0), 36.0);
-    float fgSoft = smoothstep(0.35, 0.65, maskAt(p));
     float sheen = spec * refraction * (0.35 + 1.6 * edge + 0.5 * fgSoft);
     float rim = edge * refraction * 0.18 * (0.5 + 0.5 * dot(normalize(edgeDir + 1e-4), L.xy));
-    col += half3(sheen + rim);
+    col += half3(sheen + rim + bgShimmer);
 
     // ---- 5. Frosted Liquid-Glass panel (sandwiched behind the subject) ----
     float2 pc = panel.xy + panel.zw * 0.5 + tilt * 5.0 * unit * spatial;

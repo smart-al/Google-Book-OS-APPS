@@ -14,6 +14,14 @@ enum class MaskMode(val label: String) {
     NATURE("Nature"),
 }
 
+enum class LivingMotionMode(val label: String, val shaderIndex: Float) {
+    AUTO("Auto (AI)", -1f),
+    CLOUDS("Clouds & Sky", 0f),
+    OCEAN("Ocean & Water", 1f),
+    BREEZE("Nature Breeze", 2f),
+    AURA("Living Aura", 3f),
+}
+
 enum class ClockFont(val label: String, val family: String, val style: Int) {
     LIGHT("Light", "sans-serif-light", Typeface.NORMAL),
     MODERN("Modern", "sans-serif-medium", Typeface.NORMAL),
@@ -98,6 +106,10 @@ data class GlassSettings(
     val mixedColorA: Int = 0xFFFFFFFF.toInt(),
     val mixedColorB: Int = 0xFFFFFFFF.toInt(),
     val mixWeight: Float = 0f,
+    // Living Background (AI-guided real-time background animation)
+    val livingBackgroundEnabled: Boolean = true,
+    val livingMotionMode: LivingMotionMode = LivingMotionMode.AUTO,
+    val livingMotionIntensity: Float = 0.75f,
 )
 
 /** Decoded source image + depth map + subject mask, as cached in `filesDir`. */
@@ -106,6 +118,7 @@ class SceneBitmaps(
     val depth: Bitmap,
     val mask: Bitmap,
     val detectedMode: MaskMode = MaskMode.OBJECT,
+    val detectedMotion: LivingMotionMode = LivingMotionMode.AURA,
 )
 
 object SceneStore {
@@ -129,6 +142,10 @@ object SceneStore {
     const val KEY_MIXED_COLOR_B = "mixed_color_b"
     const val KEY_MIX_WEIGHT = "mix_weight"
     const val KEY_GEMINI_API_KEY = "gemini_api_key"
+    const val KEY_LIVING_BG = "living_background"
+    const val KEY_LIVING_MODE = "living_motion_mode"
+    const val KEY_LIVING_INTENSITY = "living_motion_intensity"
+    const val KEY_DETECTED_MOTION = "detected_living_motion"
 
     const val SOURCE_FILE = "source.jpg"
     const val DEPTH_FILE = "depth.png"
@@ -154,6 +171,8 @@ object SceneStore {
         val mixedColorA = p.getInt(KEY_MIXED_COLOR_A, d.mixedColorA)
         val mixedColorB = p.getInt(KEY_MIXED_COLOR_B, d.mixedColorB)
         val mixWeight = p.getFloat(KEY_MIX_WEIGHT, d.mixWeight)
+        val livingModeName = p.getString(KEY_LIVING_MODE, d.livingMotionMode.name) ?: d.livingMotionMode.name
+        val livingMode = runCatching { LivingMotionMode.valueOf(livingModeName) }.getOrDefault(d.livingMotionMode)
 
         return GlassSettings(
             spatialEnabled = p.getBoolean(KEY_SPATIAL, d.spatialEnabled),
@@ -172,6 +191,9 @@ object SceneStore {
             mixedColorA = mixedColorA,
             mixedColorB = mixedColorB,
             mixWeight = mixWeight,
+            livingBackgroundEnabled = p.getBoolean(KEY_LIVING_BG, d.livingBackgroundEnabled),
+            livingMotionMode = livingMode,
+            livingMotionIntensity = p.getFloat(KEY_LIVING_INTENSITY, d.livingMotionIntensity).coerceIn(0f, 1.5f),
         )
     }
 
@@ -193,6 +215,9 @@ object SceneStore {
             .putInt(KEY_MIXED_COLOR_A, s.mixedColorA)
             .putInt(KEY_MIXED_COLOR_B, s.mixedColorB)
             .putFloat(KEY_MIX_WEIGHT, s.mixWeight)
+            .putBoolean(KEY_LIVING_BG, s.livingBackgroundEnabled)
+            .putString(KEY_LIVING_MODE, s.livingMotionMode.name)
+            .putFloat(KEY_LIVING_INTENSITY, s.livingMotionIntensity)
             .apply()
     }
 
@@ -203,6 +228,15 @@ object SceneStore {
     fun loadDetectedMode(context: Context): MaskMode {
         val name = prefs(context).getString(KEY_DETECTED_MODE, MaskMode.OBJECT.name) ?: MaskMode.OBJECT.name
         return runCatching { MaskMode.valueOf(name) }.getOrDefault(MaskMode.OBJECT)
+    }
+
+    fun saveDetectedMotion(context: Context, mode: LivingMotionMode) {
+        prefs(context).edit().putString(KEY_DETECTED_MOTION, mode.name).apply()
+    }
+
+    fun loadDetectedMotion(context: Context): LivingMotionMode {
+        val name = prefs(context).getString(KEY_DETECTED_MOTION, LivingMotionMode.AURA.name) ?: LivingMotionMode.AURA.name
+        return runCatching { LivingMotionMode.valueOf(name) }.getOrDefault(LivingMotionMode.AURA)
     }
 
     fun hasScene(context: Context): Boolean =
@@ -225,12 +259,13 @@ object SceneStore {
         if (!hasScene(context)) return null
         val dir = context.filesDir
         val detected = loadDetectedMode(context)
+        val detectedMotion = loadDetectedMotion(context)
         val selected = loadSettings(context).maskMode
         val maskFile = File(dir, maskFileFor(selected, detected)).takeIf { it.exists() } ?: File(dir, MASK_FILE)
         val photo = BitmapFactory.decodeFile(File(dir, SOURCE_FILE).path) ?: return null
         val depth = BitmapFactory.decodeFile(File(dir, DEPTH_FILE).path) ?: return null
         val mask = BitmapFactory.decodeFile(maskFile.path) ?: return null
-        return SceneBitmaps(photo, depth, mask, detected)
+        return SceneBitmaps(photo, depth, mask, detected, detectedMotion)
     }
 
     /** Switches active mask.png from cached variants and notifies wallpaper engine. */
@@ -262,6 +297,7 @@ object SceneStore {
             File(dir, MASK_FILE).copyTo(File(dir, MASK_OBJECT_FILE), overwrite = true)
             File(dir, MASK_FILE).copyTo(File(dir, MASK_NATURE_FILE), overwrite = true)
             saveDetectedMode(context, MaskMode.PORTRAIT)
+            saveDetectedMotion(context, LivingMotionMode.CLOUDS)
             bumpSceneVersion(context)
         }
         return loadScene(context)
@@ -341,5 +377,92 @@ object GlassColorOps {
             (c and 0xFF) / 255f,
             ((c ushr 24) and 0xFF) / 255f,
         )
+    }
+}
+
+/**
+ * On-device AI scene-motion classifier that inspects background color & spatial zones
+ * (sky/clouds, ocean/water, foliage/breeze, or portrait/ambient aura) to automatically
+ * select the most lifelike background animation for any photo.
+ */
+object LivingMotionOps {
+
+    fun resolveEffectiveMode(selected: LivingMotionMode, detected: LivingMotionMode): LivingMotionMode =
+        if (selected == LivingMotionMode.AUTO) {
+            if (detected == LivingMotionMode.AUTO) LivingMotionMode.AURA else detected
+        } else {
+            selected
+        }
+
+    fun detectFromBitmap(photo: Bitmap, mask: Bitmap, detectedMaskMode: MaskMode): LivingMotionMode {
+        val gridW = 24
+        val gridH = 16
+        val pixels = IntArray(gridW * gridH)
+        val maskVals = FloatArray(gridW * gridH)
+        for (gy in 0 until gridH) {
+            val py = ((gy + 0.5f) / gridH * photo.height).toInt().coerceIn(0, photo.height - 1)
+            val my = ((gy + 0.5f) / gridH * mask.height).toInt().coerceIn(0, mask.height - 1)
+            for (gx in 0 until gridW) {
+                val px = ((gx + 0.5f) / gridW * photo.width).toInt().coerceIn(0, photo.width - 1)
+                val mx = ((gx + 0.5f) / gridW * mask.width).toInt().coerceIn(0, mask.width - 1)
+                val idx = gy * gridW + gx
+                pixels[idx] = photo.getPixel(px, py)
+                maskVals[idx] = ((mask.getPixel(mx, my) ushr 16) and 0xFF) / 255f
+            }
+        }
+        return detectFromSampleGrid(pixels, maskVals, gridW, gridH, detectedMaskMode)
+    }
+
+    fun detectFromSampleGrid(
+        pixels: IntArray,
+        maskVals: FloatArray,
+        gridW: Int,
+        gridH: Int,
+        detectedMaskMode: MaskMode,
+    ): LivingMotionMode {
+        var skyScore = 0f
+        var waterScore = 0f
+        var greenScore = 0f
+        var bgCount = 0
+
+        for (y in 0 until gridH) {
+            val ny = y.toFloat() / gridH.coerceAtLeast(1)
+            for (x in 0 until gridW) {
+                val i = y * gridW + x
+                if (maskVals[i] > 0.5f) continue
+                bgCount++
+                val c = pixels[i]
+                val r = ((c ushr 16) and 0xFF) / 255f
+                val g = ((c ushr 8) and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val luma = 0.299f * r + 0.587f * g + 0.114f * b
+
+                // Upper-half bright/cool sky or soft clouds
+                if (ny < 0.55f && (b >= r - 0.03f) && luma > 0.42f) {
+                    skyScore += 1f
+                }
+                // Lower-half ocean/water (blue/cyan/teal dominant)
+                if (ny >= 0.40f && b > r + 0.06f && (b + g) > r * 1.6f) {
+                    waterScore += 1.2f
+                }
+                // Foliage / grass / forest green
+                if (g > r + 0.04f && g >= b - 0.02f && luma in 0.12f..0.82f) {
+                    greenScore += 1.1f
+                }
+            }
+        }
+
+        if (bgCount == 0) return LivingMotionMode.AURA
+        val skyRatio = skyScore / bgCount
+        val waterRatio = waterScore / bgCount
+        val greenRatio = greenScore / bgCount
+
+        return when {
+            waterRatio >= 0.14f && waterRatio >= greenRatio -> LivingMotionMode.OCEAN
+            skyRatio >= 0.20f && skyRatio >= waterRatio && skyRatio >= greenRatio -> LivingMotionMode.CLOUDS
+            greenRatio >= 0.16f -> LivingMotionMode.BREEZE
+            detectedMaskMode == MaskMode.NATURE -> LivingMotionMode.CLOUDS
+            else -> LivingMotionMode.AURA
+        }
     }
 }

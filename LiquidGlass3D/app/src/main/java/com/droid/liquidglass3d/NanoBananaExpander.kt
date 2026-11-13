@@ -19,7 +19,9 @@ import kotlin.math.max
  */
 object NanoBananaExpander {
     const val MODEL_ID = "gemini-nano-banana-2.1"
+    const val VISION_MODEL_ID = "gemini-4-hydrogen"
     const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL_ID:generateContent"
+    const val VISION_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$VISION_MODEL_ID:generateContent"
     const val TARGET_ASPECT = 16f / 10f
     const val DEFAULT_OUTPAINT_PROMPT =
         "Seamlessly expand and outpaint the borders of this image to fill a 16:10 widescreen frame. " +
@@ -119,4 +121,65 @@ object NanoBananaExpander {
             conn.disconnect()
         }
     }
+
+    /** Parses a Gemini vision classification response into a [LivingMotionMode]. */
+    fun parseMotionModeFromText(text: String): LivingMotionMode? {
+        val upper = text.uppercase()
+        return when {
+            "OCEAN" in upper || "WATER" in upper || "SEA" in upper -> LivingMotionMode.OCEAN
+            "CLOUD" in upper || "SKY" in upper -> LivingMotionMode.CLOUDS
+            "BREEZE" in upper || "WIND" in upper || "TREE" in upper || "FOREST" in upper -> LivingMotionMode.BREEZE
+            "AURA" in upper || "ANIMAL" in upper || "PORTRAIT" in upper -> LivingMotionMode.AURA
+            else -> null
+        }
+    }
+
+    /** Uses Gemini (`gemini-4-hydrogen`) to classify the best background animation for [source]. */
+    suspend fun classifyBackgroundMotion(apiKey: String, source: Bitmap): LivingMotionMode? =
+        withContext(Dispatchers.IO) {
+            val trimmedKey = apiKey.trim()
+            if (trimmedKey.isBlank()) return@withContext null
+
+            val jpegBytes = ByteArrayOutputStream().use { out ->
+                source.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                out.toByteArray()
+            }
+            val b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+            val prompt = "Inspect the background of this wallpaper photo and reply with ONLY one word from: " +
+                "CLOUDS (sky/clouds), OCEAN (water/sea/waves), BREEZE (trees/grass/nature), or AURA (animals/people/indoors/abstract)."
+            val content = JSONObject().put(
+                "parts",
+                JSONArray()
+                    .put(JSONObject().put("text", prompt))
+                    .put(JSONObject().put("inlineData", JSONObject().put("mimeType", "image/jpeg").put("data", b64))),
+            )
+            val body = JSONObject().put("contents", JSONArray().put(content)).toString()
+
+            val conn = (URL(VISION_ENDPOINT).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 12_000
+                readTimeout = 20_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("x-goog-api-key", trimmedKey)
+            }
+            try {
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                if (conn.responseCode !in 200..299) return@withContext null
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                val reply = JSONObject(text)
+                    .optJSONArray("candidates")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("content")
+                    ?.optJSONArray("parts")
+                    ?.optJSONObject(0)
+                    ?.optString("text")
+                    .orEmpty()
+                parseMotionModeFromText(reply)
+            } catch (_: Exception) {
+                null
+            } finally {
+                conn.disconnect()
+            }
+        }
 }

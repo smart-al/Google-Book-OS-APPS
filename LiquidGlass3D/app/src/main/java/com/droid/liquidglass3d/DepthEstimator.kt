@@ -103,8 +103,10 @@ class DepthEstimator(
                 MaskMode.AUTO -> objectBmp
             }
             save(activeBmp, SceneStore.MASK_FILE)
+            val detectedMotion = LivingMotionOps.detectFromBitmap(photo, activeBmp, detectedMode)
+            SceneStore.saveDetectedMotion(context, detectedMotion)
             SceneStore.bumpSceneVersion(context)
-            SceneBitmaps(photo, depthBmp, activeBmp, detectedMode)
+            SceneBitmaps(photo, depthBmp, activeBmp, detectedMode, detectedMotion)
         }
 
     private fun loadModelBuffer(assetName: String): ByteBuffer {

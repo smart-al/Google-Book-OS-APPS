@@ -27,6 +27,9 @@ class LiquidGlassUnitTest {
         assertEquals(0xFFFFFFFF.toInt(), s.mixedColorA)
         assertEquals(0xFFFFFFFF.toInt(), s.mixedColorB)
         assertEquals(0f, s.mixWeight, 0.001f)
+        assertTrue(s.livingBackgroundEnabled)
+        assertEquals(LivingMotionMode.AUTO, s.livingMotionMode)
+        assertEquals(0.75f, s.livingMotionIntensity, 0.001f)
     }
 
     @Test
@@ -301,5 +304,45 @@ class LiquidGlassUnitTest {
         val (p1, r1) = ParallaxFilter.anglesFromGravity(9.81f, 0f, 0f)
         assertEquals(0f, p1, 0.001f)
         assertTrue(r1 > 1.5f)
+    }
+
+    @Test
+    fun testLivingMotionOpsDetectionAndResolution() {
+        assertEquals(LivingMotionMode.OCEAN, LivingMotionOps.resolveEffectiveMode(LivingMotionMode.AUTO, LivingMotionMode.OCEAN))
+        assertEquals(LivingMotionMode.CLOUDS, LivingMotionOps.resolveEffectiveMode(LivingMotionMode.CLOUDS, LivingMotionMode.OCEAN))
+        assertEquals(LivingMotionMode.AURA, LivingMotionOps.resolveEffectiveMode(LivingMotionMode.AUTO, LivingMotionMode.AUTO))
+
+        val w = 8
+        val h = 8
+        val noMask = FloatArray(w * h) { 0f }
+
+        // Lower-half ocean blue -> OCEAN
+        val oceanPixels = IntArray(w * h) { idx ->
+            val y = idx / w
+            if (y >= 4) 0xFF0077BE.toInt() else 0xFF222222.toInt()
+        }
+        assertEquals(LivingMotionMode.OCEAN, LivingMotionOps.detectFromSampleGrid(oceanPixels, noMask, w, h, MaskMode.NATURE))
+
+        // Upper-half bright sky/clouds -> CLOUDS
+        val skyPixels = IntArray(w * h) { idx ->
+            val y = idx / w
+            if (y < 4) 0xFFB0D8FF.toInt() else 0xFF332211.toInt()
+        }
+        assertEquals(LivingMotionMode.CLOUDS, LivingMotionOps.detectFromSampleGrid(skyPixels, noMask, w, h, MaskMode.NATURE))
+
+        // Forest green -> BREEZE
+        val greenPixels = IntArray(w * h) { 0xFF2E7D32.toInt() }
+        assertEquals(LivingMotionMode.BREEZE, LivingMotionOps.detectFromSampleGrid(greenPixels, noMask, w, h, MaskMode.OBJECT))
+
+        // Warm dark indoor -> AURA
+        val warmPixels = IntArray(w * h) { 0xFF3E2723.toInt() }
+        assertEquals(LivingMotionMode.AURA, LivingMotionOps.detectFromSampleGrid(warmPixels, noMask, w, h, MaskMode.PORTRAIT))
+
+        // Gemini text parser
+        assertEquals(LivingMotionMode.OCEAN, NanoBananaExpander.parseMotionModeFromText("OCEAN"))
+        assertEquals(LivingMotionMode.CLOUDS, NanoBananaExpander.parseMotionModeFromText("Clouds"))
+        assertEquals(LivingMotionMode.BREEZE, NanoBananaExpander.parseMotionModeFromText("breeze"))
+        assertEquals(LivingMotionMode.AURA, NanoBananaExpander.parseMotionModeFromText("AURA"))
+        assertEquals(null, NanoBananaExpander.parseMotionModeFromText("unknown"))
     }
 }

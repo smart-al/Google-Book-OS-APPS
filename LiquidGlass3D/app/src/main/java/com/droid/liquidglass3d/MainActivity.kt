@@ -151,7 +151,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(busyStage = "Starting…", error = null) }
         viewModelScope.launch {
             try {
-                val scene = estimator.process(uri) { stage -> _state.update { it.copy(busyStage = stage) } }
+                var scene = estimator.process(uri) { stage -> _state.update { it.copy(busyStage = stage) } }
+                val key = _state.value.geminiApiKey
+                if (key.isNotBlank()) {
+                    _state.update { it.copy(busyStage = "AI choosing background motion…") }
+                    val geminiMotion = NanoBananaExpander.classifyBackgroundMotion(key, scene.photo)
+                    if (geminiMotion != null) {
+                        SceneStore.saveDetectedMotion(getApplication(), geminiMotion)
+                        scene = SceneBitmaps(scene.photo, scene.depth, scene.mask, scene.detectedMode, geminiMotion)
+                    }
+                }
                 _state.update { it.copy(scene = scene, sceneVersion = it.sceneVersion + 1, busyStage = null) }
             } catch (e: Exception) {
                 _state.update { it.copy(busyStage = null, error = e.message ?: e.javaClass.simpleName) }
@@ -470,6 +479,43 @@ private fun ControlsPane(
             }
             LabeledSlider("Glass Image Blending", s.glassBlend, 0f..1f) { v ->
                 vm.updateSettings { it.copy(glassBlend = v) }
+            }
+
+            HorizontalDivider()
+
+            // Living Background (AI-Guided Background Animation)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    val detectedMotion = ui.scene?.detectedMotion?.label
+                    val title = if (s.livingMotionMode == LivingMotionMode.AUTO && detectedMotion != null) {
+                        "Living Background · AI: $detectedMotion"
+                    } else {
+                        "Living Background"
+                    }
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text("Brings clouds, ocean, breeze & aura to life behind the subject", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = s.livingBackgroundEnabled,
+                    onCheckedChange = { v -> vm.updateSettings { it.copy(livingBackgroundEnabled = v) } },
+                )
+            }
+            if (s.livingBackgroundEnabled) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    LivingMotionMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = s.livingMotionMode == mode,
+                            onClick = { vm.updateSettings { it.copy(livingMotionMode = mode) } },
+                            label = { Text(mode.label) },
+                        )
+                    }
+                }
+                LabeledSlider("Motion Intensity", s.livingMotionIntensity, 0f..1.5f) { v ->
+                    vm.updateSettings { it.copy(livingMotionIntensity = v) }
+                }
             }
 
             HorizontalDivider()
