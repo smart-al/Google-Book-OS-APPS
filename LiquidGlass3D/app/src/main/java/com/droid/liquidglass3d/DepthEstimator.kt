@@ -316,7 +316,37 @@ class DepthEstimator(
     }
 
     /** Robust min/max normalization (2nd–98th percentile) to 0..255. */
-    private fun normalize(raw: FloatArray): FloatArray {
+    internal fun normalize(raw: FloatArray): FloatArray = DepthOps.normalize(raw)
+
+    internal fun upsample(src: FloatArray, sw: Int, sh: Int, dw: Int, dh: Int): FloatArray =
+        DepthOps.upsample(src, sw, sh, dw, dh)
+
+    /** Nature / Landscape fallback: smooth near-plane foreground ramp from the depth map. */
+    internal fun buildNatureDepthMask(depth: FloatArray, w: Int, h: Int): FloatArray =
+        DepthOps.buildNatureDepthMask(depth, w, h)
+
+    internal fun boxBlur(src: FloatArray, w: Int, h: Int, r: Int): FloatArray =
+        DepthOps.boxBlur(src, w, h, r)
+
+    private fun grayToBitmap(gray: FloatArray, w: Int, h: Int): Bitmap {
+        val px = IntArray(w * h) { val g = gray[it].roundToInt().coerceIn(0, 255); Color.rgb(g, g, g) }
+        return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun save(bmp: Bitmap, name: String, jpeg: Boolean = false) {
+        val target = File(context.filesDir, name)
+        val tmp = File(context.filesDir, "$name.tmp")
+        FileOutputStream(tmp).use {
+            if (jpeg) bmp.compress(Bitmap.CompressFormat.JPEG, 94, it)
+            else bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+        tmp.renameTo(target)
+    }
+}
+
+object DepthOps {
+    /** Robust min/max normalization (2nd–98th percentile) to 0..255. */
+    fun normalize(raw: FloatArray): FloatArray {
         val sorted = raw.copyOf().also { it.sort() }
         val lo = sorted[(sorted.size * 0.02f).toInt().coerceIn(0, sorted.lastIndex)]
         val hi = sorted[(sorted.size * 0.98f).toInt().coerceIn(0, sorted.lastIndex)]
@@ -324,7 +354,7 @@ class DepthEstimator(
         return FloatArray(raw.size) { ((raw[it] - lo) / range).coerceIn(0f, 1f) * 255f }
     }
 
-    private fun upsample(src: FloatArray, sw: Int, sh: Int, dw: Int, dh: Int): FloatArray {
+    fun upsample(src: FloatArray, sw: Int, sh: Int, dw: Int, dh: Int): FloatArray {
         val dst = FloatArray(dw * dh)
         for (y in 0 until dh) {
             val fy = ((y + 0.5f) * sh / dh - 0.5f).coerceIn(0f, sh - 1f)
@@ -341,7 +371,7 @@ class DepthEstimator(
     }
 
     /** Nature / Landscape fallback: smooth near-plane foreground ramp from the depth map. */
-    private fun buildNatureDepthMask(depth: FloatArray, w: Int, h: Int): FloatArray {
+    fun buildNatureDepthMask(depth: FloatArray, w: Int, h: Int): FloatArray {
         val sorted = depth.copyOf().also { it.sort() }
         val thr = sorted[(sorted.size * 0.62f).toInt().coerceIn(0, sorted.lastIndex)]
         val soft = 24f
@@ -350,10 +380,11 @@ class DepthEstimator(
             t * t * (3 - 2 * t) * 255f
         }
         val radius = max(2, min(w, h) / 140)
-        return boxBlur(boxBlur(m, w, h, radius), w, h, radius)
+        val blurred = boxBlur(boxBlur(m, w, h, radius), w, h, radius)
+        return FloatArray(blurred.size) { blurred[it].coerceIn(0f, 255f) }
     }
 
-    private fun boxBlur(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+    fun boxBlur(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
         val tmp = FloatArray(src.size); val out = FloatArray(src.size)
         val k = 2 * r + 1
         for (y in 0 until h) {
@@ -373,20 +404,5 @@ class DepthEstimator(
             }
         }
         return out
-    }
-
-    private fun grayToBitmap(gray: FloatArray, w: Int, h: Int): Bitmap {
-        val px = IntArray(w * h) { val g = gray[it].roundToInt().coerceIn(0, 255); Color.rgb(g, g, g) }
-        return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
-    }
-
-    private fun save(bmp: Bitmap, name: String, jpeg: Boolean = false) {
-        val target = File(context.filesDir, name)
-        val tmp = File(context.filesDir, "$name.tmp")
-        FileOutputStream(tmp).use {
-            if (jpeg) bmp.compress(Bitmap.CompressFormat.JPEG, 94, it)
-            else bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
-        }
-        tmp.renameTo(target)
     }
 }

@@ -88,15 +88,11 @@ class LiquidGlassRenderer(context: Context) {
     private fun clampShader(b: Bitmap) = BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
 
     private fun layoutPanel(w: Int, h: Int, settings: GlassSettings) {
-        val unit = h / 1000f
-        val scale = settings.clockScale.coerceIn(0.65f, 1.45f)
-        panelW = min(w * 0.92f, minOf(w * 0.72f, 640f * unit * 1.4f) * scale)
-        panelH = min(h * 0.44f, 250f * unit * 1.1f * scale)
-
-        val maxPanelX = max(0f, w - panelW)
-        val maxPanelY = max(0f, h - panelH)
-        panelX = maxPanelX * settings.clockPosX.coerceIn(0f, 1f)
-        panelY = maxPanelY * settings.clockPosY.coerceIn(0f, 1f)
+        val bounds = LiquidGlassLayout.calculate(w, h, settings.clockScale, settings.clockPosX, settings.clockPosY)
+        panelW = bounds.width
+        panelH = bounds.height
+        panelX = bounds.x
+        panelY = bounds.y
 
         clockBitmap = Bitmap.createBitmap(max(1, panelW.toInt()), max(1, panelH.toInt()), Bitmap.Config.ARGB_8888)
         clockCanvas = Canvas(clockBitmap!!)
@@ -194,7 +190,7 @@ class LiquidGlassRenderer(context: Context) {
      * center alignment and aspect ratio. For 16:10 Google Book laptops (e.g. 2560x1600),
      * this guarantees standard 16:10 frame rendering.
      */
-    private fun coverCrop(src: Bitmap, w: Int, h: Int): Bitmap {
+    internal fun coverCrop(src: Bitmap, w: Int, h: Int): Bitmap {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val s = max(w / src.width.toFloat(), h / src.height.toFloat())
         val m = Matrix().apply {
@@ -203,5 +199,31 @@ class LiquidGlassRenderer(context: Context) {
         }
         Canvas(out).drawBitmap(src, m, Paint(Paint.FILTER_BITMAP_FLAG))
         return out
+    }
+}
+
+data class PanelBounds(val x: Float, val y: Float, val width: Float, val height: Float) {
+    val right: Float get() = x + width
+    val bottom: Float get() = y + height
+}
+
+object LiquidGlassLayout {
+    fun calculate(
+        w: Int,
+        h: Int,
+        scale: Float,
+        posX: Float,
+        posY: Float
+    ): PanelBounds {
+        val unit = h / 1000f
+        val clampedScale = scale.coerceIn(0.65f, 1.45f)
+        val panelW = min(w * 0.92f, minOf(w * 0.72f, 640f * unit * 1.4f) * clampedScale)
+        val panelH = min(h * 0.44f, 250f * unit * 1.1f * clampedScale)
+
+        val maxPanelX = max(0f, w - panelW)
+        val maxPanelY = max(0f, h - panelH)
+        val panelX = maxPanelX * posX.coerceIn(0f, 1f)
+        val panelY = maxPanelY * posY.coerceIn(0f, 1f)
+        return PanelBounds(panelX, panelY, panelW, panelH)
     }
 }

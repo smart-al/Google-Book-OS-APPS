@@ -30,15 +30,10 @@ class ParallaxController(context: Context) : SensorEventListener {
     private val orient = FloatArray(3)
     private var baseline: FloatArray? = null
 
-    private var sensorX = 0f; private var sensorY = 0f
-    private var pointerX = 0f; private var pointerY = 0f
-    private var pageOffsetX = 0f
-    private var pointerWeight = 0f
-    private var pointerWeightTarget = 0f
-    private var lastPointerNs = 0L
+    private val filter = ParallaxFilter()
 
-    var x = 0f; private set
-    var y = 0f; private set
+    val x: Float get() = filter.x
+    val y: Float get() = filter.y
 
     val hasSensor: Boolean get() = rotationSensor != null
 
@@ -49,35 +44,21 @@ class ParallaxController(context: Context) : SensorEventListener {
 
     fun stop() {
         sensorManager.unregisterListener(this)
-        pointerWeightTarget = 0f
+        filter.stop()
     }
 
     /** Pointer position normalized to the view/surface: (px,py) in px, size in px. */
     fun onPointer(px: Float, py: Float, w: Float, h: Float, active: Boolean = true) {
-        if (w <= 0f || h <= 0f) return
-        pointerX = ((px / w) * 2f - 1f).coerceIn(-1f, 1f)
-        pointerY = ((py / h) * 2f - 1f).coerceIn(-1f, 1f)
-        pointerWeightTarget = if (active) 1f else 0f
-        lastPointerNs = System.nanoTime()
+        filter.onPointer(px, py, w, h, active)
     }
 
-    fun onPointerExit() { pointerWeightTarget = 0f }
+    fun onPointerExit() { filter.onPointerExit() }
 
     /** Launcher page scroll (onOffsetsChanged): 0..1 -> -1..1, added on top. */
-    fun onPageOffset(xOffset: Float) { pageOffsetX = (xOffset * 2f - 1f).coerceIn(-1f, 1f) }
+    fun onPageOffset(xOffset: Float) { filter.onPageOffset(xOffset) }
 
     /** Advance smoothing; call once per frame. */
-    fun step(dtSeconds: Float) {
-        // Pointer idle for >2.5s => hand control back to the sensor.
-        if (pointerWeightTarget > 0f && System.nanoTime() - lastPointerNs > 2_500_000_000L) pointerWeightTarget = 0f
-        pointerWeight += (pointerWeightTarget - pointerWeight) * (1f - exp(-dtSeconds * 6f))
-
-        val tx = sensorX * (1f - pointerWeight) + pointerX * pointerWeight + pageOffsetX * 0.35f
-        val ty = sensorY * (1f - pointerWeight) + pointerY * pointerWeight
-        val k = 1f - exp(-dtSeconds * 12f)
-        x += (tx.coerceIn(-1f, 1f) - x) * k
-        y += (ty.coerceIn(-1f, 1f) - y) * k
-    }
+    fun step(dtSeconds: Float) { filter.step(dtSeconds) }
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
@@ -101,9 +82,64 @@ class ParallaxController(context: Context) : SensorEventListener {
         val range = (PI / 9).toFloat() // ±20° = full deflection
         val targetX = ((orient[2] - b[1]) / range).coerceIn(-1f, 1f)
         val targetY = ((orient[1] - b[0]) / range).coerceIn(-1f, 1f)
-        sensorX += (targetX - sensorX) * 0.25f
-        sensorY += (-targetY - sensorY) * 0.25f
+        filter.onSensorTarget(targetX, -targetY)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+}
+
+/**
+ * Pure physics & smoothing filter for interactive 3D parallax.
+ * Blends sensor attitude with cursor/touch interaction and desktop scroll offsets.
+ */
+class ParallaxFilter {
+    var x = 0f; private set
+    var y = 0f; private set
+
+    private var sensorX = 0f
+    private var sensorY = 0f
+    private var pointerX = 0f
+    private var pointerY = 0f
+    private var pageOffsetX = 0f
+    private var pointerWeight = 0f
+    private var pointerWeightTarget = 0f
+    private var lastPointerNs = 0L
+
+    fun stop() {
+        pointerWeightTarget = 0f
+    }
+
+    fun onPointer(px: Float, py: Float, w: Float, h: Float, active: Boolean = true) {
+        if (w <= 0f || h <= 0f) return
+        pointerX = ((px / w) * 2f - 1f).coerceIn(-1f, 1f)
+        pointerY = ((py / h) * 2f - 1f).coerceIn(-1f, 1f)
+        pointerWeightTarget = if (active) 1f else 0f
+        lastPointerNs = System.nanoTime()
+    }
+
+    fun onPointerExit() {
+        pointerWeightTarget = 0f
+    }
+
+    fun onPageOffset(xOffset: Float) {
+        pageOffsetX = (xOffset * 2f - 1f).coerceIn(-1f, 1f)
+    }
+
+    fun onSensorTarget(targetX: Float, targetY: Float) {
+        sensorX += (targetX - sensorX) * 0.25f
+        sensorY += (targetY - sensorY) * 0.25f
+    }
+
+    fun step(dtSeconds: Float) {
+        if (pointerWeightTarget > 0f && System.nanoTime() - lastPointerNs > 2_500_000_000L) {
+            pointerWeightTarget = 0f
+        }
+        pointerWeight += (pointerWeightTarget - pointerWeight) * (1f - exp(-dtSeconds * 6f))
+
+        val tx = sensorX * (1f - pointerWeight) + pointerX * pointerWeight + pageOffsetX * 0.35f
+        val ty = sensorY * (1f - pointerWeight) + pointerY * pointerWeight
+        val k = 1f - exp(-dtSeconds * 12f)
+        x += (tx.coerceIn(-1f, 1f) - x) * k
+        y += (ty.coerceIn(-1f, 1f) - y) * k
+    }
 }

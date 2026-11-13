@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="depth.png" />
+        <exclude domain="file" path="mask.png" />
+        <exclude domain="file" path="source.jpg" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="liquid_glass_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
