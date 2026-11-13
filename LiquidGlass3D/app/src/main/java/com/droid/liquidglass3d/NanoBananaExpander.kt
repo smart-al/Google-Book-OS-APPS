@@ -30,7 +30,7 @@ object NanoBananaExpander {
     fun needsExpansionTo16x10(width: Int, height: Int): Boolean {
         if (width <= 0 || height <= 0) return false
         val ratio = width.toFloat() / height.toFloat()
-        return abs(ratio - TARGET_ASPECT) > 0.08f || max(width, height) < 1280
+        return abs(ratio - TARGET_ASPECT) > 0.20f || max(width, height) < 1280
     }
 
     /** Builds the Gemini `generateContent` JSON payload for 16:10 Nano Banana outpainting. */
@@ -45,7 +45,7 @@ object NanoBananaExpander {
         val content = JSONObject().put("parts", JSONArray().put(textPart).put(imagePart))
         val generationConfig = JSONObject()
             .put("responseModalities", JSONArray().put("IMAGE"))
-            .put("imageConfig", JSONObject().put("aspectRatio", "16:10"))
+            .put("imageConfig", JSONObject().put("aspectRatio", "16:9"))
 
         return JSONObject()
             .put("contents", JSONArray().put(content))

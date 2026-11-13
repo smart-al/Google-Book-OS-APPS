@@ -335,7 +335,7 @@ class LiquidGlassRobolectricTest {
 
         val req = NanoBananaExpander.buildOutpaintRequestJson("AQID", "Expand beach borders")
         assertTrue(req.contains("Expand beach borders"))
-        assertTrue(req.contains("16:10"))
+        assertTrue(req.contains("16:9"))
         assertTrue(req.contains("AQID"))
 
         val okResponse = """
