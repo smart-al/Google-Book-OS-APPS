@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,6 +57,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
@@ -425,7 +427,7 @@ private fun ControlsPane(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("3D Spatial Mode", style = MaterialTheme.typography.titleMedium)
-                    Text("Parallax from tilt, pointer & desktop offset", style = MaterialTheme.typography.bodySmall)
+                    Text("Live wallpaper: touch drag, device tilt & swipe (mouse hover works in preview)", style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = s.spatialEnabled, onCheckedChange = { v -> vm.updateSettings { it.copy(spatialEnabled = v) } })
             }
@@ -516,6 +518,38 @@ private fun ControlsPane(
                 }
             }
 
+            // Custom Glass Tint (solid + mix)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Custom Glass Tint & Mix", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ColorSwatchBox(color = s.solidColor, label = "Base") { newColor ->
+                        vm.updateSettings { it.copy(solidColor = newColor) }
+                    }
+                    ColorSwatchBox(color = s.mixedColorA, label = "Mix A") { newColor ->
+                        vm.updateSettings { it.copy(mixedColorA = newColor) }
+                    }
+                    ColorSwatchBox(color = s.mixedColorB, label = "Mix B") { newColor ->
+                        vm.updateSettings { it.copy(mixedColorB = newColor) }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(GlassColorOps.effectiveTintArgb(s)))
+                                .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                        )
+                        Text("Result", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                LabeledSlider("Mix Weight (0 = Base, >0 = Mix A ↔ B)", s.mixWeight, 0f..1f) { v ->
+                    vm.updateSettings { it.copy(mixWeight = v) }
+                }
+            }
+
             // Colors & Mixed Color Combinations
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -523,7 +557,7 @@ private fun ControlsPane(
                     Text(s.clockColorPreset.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
 
-                Text("Solid Glass Colors (8)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Solid Glass Colors (16)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -595,6 +629,61 @@ private fun ColorSwatch(preset: ClockColorPreset, selected: Boolean, onClick: ()
             )
             .clickable(onClick = onClick)
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColorSwatchBox(color: Int, label: String, onColorSelected: (Int) -> Unit) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color(color))
+                .border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape)
+                .clickable { showPicker = true },
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    if (showPicker) {
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("Choose $label Color") },
+            text = {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    GlassColorOps.PALETTE.forEach { paletteColor ->
+                        val isSelected = paletteColor == color
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(paletteColor))
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.4f),
+                                    shape = CircleShape,
+                                )
+                                .clickable {
+                                    onColorSelected(paletteColor)
+                                    showPicker = false
+                                },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPicker = false }) {
+                    Text("Close")
+                }
+            },
+        )
+    }
 }
 
 @Composable

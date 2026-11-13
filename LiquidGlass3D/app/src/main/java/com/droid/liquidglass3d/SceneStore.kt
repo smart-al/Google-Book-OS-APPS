@@ -28,7 +28,7 @@ enum class ClockColorPreset(
     val colors: IntArray,
     val isGradient: Boolean = false,
 ) {
-    // Solid Glass Tones (8)
+    // Solid Glass Tones (16)
     WHITE("Pure White", intArrayOf(0xFFFFFFFF.toInt())),
     CYAN("Ice Cyan", intArrayOf(0xFFB3E5FC.toInt())),
     GOLD("Soft Gold", intArrayOf(0xFFFFE082.toInt())),
@@ -37,6 +37,14 @@ enum class ClockColorPreset(
     VIOLET("Electric Violet", intArrayOf(0xFFE1BEE7.toInt())),
     CORAL("Neon Coral", intArrayOf(0xFFFF8A80.toInt())),
     OBSIDIAN("Obsidian", intArrayOf(0xFF1E2430.toInt())),
+    CRIMSON("Crimson Ruby", intArrayOf(0xFFE53935.toInt())),
+    COBALT("Cobalt Blue", intArrayOf(0xFF1E88E5.toInt())),
+    EMERALD_SOLID("Emerald Green", intArrayOf(0xFF43A047.toInt())),
+    TANGERINE("Tangerine", intArrayOf(0xFFFB8C00.toInt())),
+    LAVENDER("Soft Lavender", intArrayOf(0xFFB39DDB.toInt())),
+    TEAL("Deep Teal", intArrayOf(0xFF00897B.toInt())),
+    AMBER("Warm Amber", intArrayOf(0xFFFFB300.toInt())),
+    SLATE("Cool Slate", intArrayOf(0xFF90A4AE.toInt())),
 
     // Mixed & Liquid Gradients (28 Total: 8 Original + 20 New)
     CYBERPUNK("Cyberpunk", intArrayOf(0xFF00F5D4.toInt(), 0xFFF72585.toInt()), true),
@@ -85,6 +93,11 @@ data class GlassSettings(
     val clockColorPreset: ClockColorPreset = ClockColorPreset.WHITE,
     val clockFont: ClockFont = ClockFont.LIGHT,
     val showDate: Boolean = true,
+    // New color fields
+    val solidColor: Int = 0xFFFFFFFF.toInt(),
+    val mixedColorA: Int = 0xFFFFFFFF.toInt(),
+    val mixedColorB: Int = 0xFFFFFFFF.toInt(),
+    val mixWeight: Float = 0f,
 )
 
 /** Decoded source image + depth map + subject mask, as cached in `filesDir`. */
@@ -111,6 +124,10 @@ object SceneStore {
     const val KEY_CLOCK_FONT = "clock_font"
     const val KEY_SHOW_DATE = "show_date"
     const val KEY_SCENE_VERSION = "scene_version"
+    const val KEY_SOLID_COLOR = "solid_color"
+    const val KEY_MIXED_COLOR_A = "mixed_color_a"
+    const val KEY_MIXED_COLOR_B = "mixed_color_b"
+    const val KEY_MIX_WEIGHT = "mix_weight"
 
     const val SOURCE_FILE = "source.jpg"
     const val DEPTH_FILE = "depth.png"
@@ -132,6 +149,11 @@ object SceneStore {
         val colorPresetName = p.getString(KEY_CLOCK_COLOR_PRESET, d.clockColorPreset.name) ?: d.clockColorPreset.name
         val colorPreset = runCatching { ClockColorPreset.valueOf(colorPresetName) }.getOrDefault(d.clockColorPreset)
 
+        val solidColor = p.getInt(KEY_SOLID_COLOR, d.solidColor)
+        val mixedColorA = p.getInt(KEY_MIXED_COLOR_A, d.mixedColorA)
+        val mixedColorB = p.getInt(KEY_MIXED_COLOR_B, d.mixedColorB)
+        val mixWeight = p.getFloat(KEY_MIX_WEIGHT, d.mixWeight)
+
         return GlassSettings(
             spatialEnabled = p.getBoolean(KEY_SPATIAL, d.spatialEnabled),
             depthIntensity = p.getFloat(KEY_DEPTH, d.depthIntensity),
@@ -145,6 +167,10 @@ object SceneStore {
             clockColorPreset = colorPreset,
             clockFont = font,
             showDate = p.getBoolean(KEY_SHOW_DATE, d.showDate),
+            solidColor = solidColor,
+            mixedColorA = mixedColorA,
+            mixedColorB = mixedColorB,
+            mixWeight = mixWeight,
         )
     }
 
@@ -162,6 +188,10 @@ object SceneStore {
             .putString(KEY_CLOCK_COLOR_PRESET, s.clockColorPreset.name)
             .putString(KEY_CLOCK_FONT, s.clockFont.name)
             .putBoolean(KEY_SHOW_DATE, s.showDate)
+            .putInt(KEY_SOLID_COLOR, s.solidColor)
+            .putInt(KEY_MIXED_COLOR_A, s.mixedColorA)
+            .putInt(KEY_MIXED_COLOR_B, s.mixedColorB)
+            .putFloat(KEY_MIX_WEIGHT, s.mixWeight)
             .apply()
     }
 
@@ -239,5 +269,69 @@ object SceneStore {
     fun bumpSceneVersion(context: Context) {
         val p = prefs(context)
         p.edit().putLong(KEY_SCENE_VERSION, p.getLong(KEY_SCENE_VERSION, 0) + 1).apply()
+    }
+}
+
+/** Pure color-blending utilities for custom solid and mixed glass tints. */
+object GlassColorOps {
+    val PALETTE: List<Int> = listOf(
+        0xFFFFFFFF.toInt(), // Pure White
+        0xFFB3E5FC.toInt(), // Ice Cyan
+        0xFF00E5FF.toInt(), // Electric Cyan
+        0xFF1E88E5.toInt(), // Cobalt Blue
+        0xFF3F2B96.toInt(), // Deep Indigo
+        0xFF9D4EDD.toInt(), // Cosmic Purple
+        0xFFE1BEE7.toInt(), // Soft Violet
+        0xFFF72585.toInt(), // Neon Pink
+        0xFFF8BBD0.toInt(), // Rose Quartz
+        0xFFE53935.toInt(), // Crimson Ruby
+        0xFFFF8A80.toInt(), // Neon Coral
+        0xFFFF5E00.toInt(), // Solar Orange
+        0xFFFB8C00.toInt(), // Tangerine
+        0xFFFFE082.toInt(), // Soft Gold
+        0xFFFFB300.toInt(), // Warm Amber
+        0xFFA7FFEB.toInt(), // Mint Glass
+        0xFF00F5D4.toInt(), // Bio Teal
+        0xFF43A047.toInt(), // Emerald Green
+        0xFF00897B.toInt(), // Deep Teal
+        0xFF90A4AE.toInt(), // Cool Slate
+        0xFF1E2430.toInt(), // Obsidian
+    )
+
+    fun blendArgb(colorA: Int, colorB: Int, weight: Float): Int {
+        val w = weight.coerceIn(0f, 1f)
+        val aA = (colorA ushr 24) and 0xFF
+        val rA = (colorA ushr 16) and 0xFF
+        val gA = (colorA ushr 8) and 0xFF
+        val bA = colorA and 0xFF
+
+        val aB = (colorB ushr 24) and 0xFF
+        val rB = (colorB ushr 16) and 0xFF
+        val gB = (colorB ushr 8) and 0xFF
+        val bB = colorB and 0xFF
+
+        val a = (aA * (1f - w) + aB * w).toInt().coerceIn(0, 255)
+        val r = (rA * (1f - w) + rB * w).toInt().coerceIn(0, 255)
+        val g = (gA * (1f - w) + gB * w).toInt().coerceIn(0, 255)
+        val b = (bA * (1f - w) + bB * w).toInt().coerceIn(0, 255)
+        return (a shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    fun effectiveTintArgb(settings: GlassSettings): Int {
+        return if (settings.mixWeight > 0f) {
+            blendArgb(settings.mixedColorA, settings.mixedColorB, settings.mixWeight)
+        } else {
+            settings.solidColor
+        }
+    }
+
+    fun effectiveGlassTint(settings: GlassSettings): FloatArray {
+        val c = effectiveTintArgb(settings)
+        return floatArrayOf(
+            ((c ushr 16) and 0xFF) / 255f,
+            ((c ushr 8) and 0xFF) / 255f,
+            (c and 0xFF) / 255f,
+            ((c ushr 24) and 0xFF) / 255f,
+        )
     }
 }

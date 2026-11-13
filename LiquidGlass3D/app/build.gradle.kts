@@ -23,7 +23,9 @@ android {
       enableUnitTestCoverage = true
     }
     release {
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
 
@@ -33,6 +35,10 @@ android {
   }
 
   buildFeatures { compose = true }
+
+  testOptions {
+    unitTests.isIncludeAndroidResources = true
+  }
 
   // The .tflite depth model must not be compressed so LiteRT can mmap it.
   androidResources { noCompress += listOf("tflite", "agsl") }
@@ -51,4 +57,5 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.litert)
   testImplementation(libs.junit)
+  testImplementation(libs.robolectric)
 }

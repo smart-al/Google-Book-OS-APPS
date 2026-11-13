@@ -23,6 +23,10 @@ class LiquidGlassUnitTest {
         assertEquals(ClockColorPreset.WHITE, s.clockColorPreset)
         assertEquals(ClockFont.LIGHT, s.clockFont)
         assertTrue(s.showDate)
+        assertEquals(0xFFFFFFFF.toInt(), s.solidColor)
+        assertEquals(0xFFFFFFFF.toInt(), s.mixedColorA)
+        assertEquals(0xFFFFFFFF.toInt(), s.mixedColorB)
+        assertEquals(0f, s.mixWeight, 0.001f)
     }
 
     @Test
@@ -54,13 +58,13 @@ class LiquidGlassUnitTest {
     @Test
     fun testClockColorPresetsComprehensive() {
         val presets = ClockColorPreset.entries
-        // 8 solid tones + 28 liquid gradients = 36 presets total
-        assertEquals(36, presets.size)
+        // 16 solid tones + 28 liquid gradients = 44 presets total
+        assertEquals(44, presets.size)
 
         val solids = presets.filter { !it.isGradient }
         val gradients = presets.filter { it.isGradient }
 
-        assertEquals(8, solids.size)
+        assertEquals(16, solids.size)
         assertEquals(28, gradients.size)
 
         solids.forEach { preset ->
@@ -254,5 +258,48 @@ class LiquidGlassUnitTest {
         assertEquals(20f, bounds.y, 0.001f)
         assertEquals(110f, bounds.right, 0.001f)
         assertEquals(70f, bounds.bottom, 0.001f)
+    }
+
+    @Test
+    fun testGlassColorOpsBlendAndTint() {
+        val red = 0xFFFF0000.toInt()
+        val blue = 0xFF0000FF.toInt()
+        val green = 0xFF00FF00.toInt()
+
+        assertEquals(red, GlassColorOps.blendArgb(red, blue, 0f))
+        assertEquals(blue, GlassColorOps.blendArgb(red, blue, 1f))
+        assertEquals(red, GlassColorOps.blendArgb(red, blue, -0.5f))
+        assertEquals(blue, GlassColorOps.blendArgb(red, blue, 1.5f))
+
+        val halfMix = GlassColorOps.blendArgb(red, blue, 0.5f)
+        assertEquals(255, (halfMix ushr 24) and 0xFF)
+        assertEquals(127, (halfMix ushr 16) and 0xFF)
+        assertEquals(0, (halfMix ushr 8) and 0xFF)
+        assertEquals(127, halfMix and 0xFF)
+
+        val solidSettings = GlassSettings(solidColor = green, mixedColorA = red, mixedColorB = blue, mixWeight = 0f)
+        val solidTint = GlassColorOps.effectiveGlassTint(solidSettings)
+        assertEquals(0f, solidTint[0], 0.001f)
+        assertEquals(1f, solidTint[1], 0.001f)
+        assertEquals(0f, solidTint[2], 0.001f)
+        assertEquals(1f, solidTint[3], 0.001f)
+
+        val mixedSettings = GlassSettings(solidColor = green, mixedColorA = red, mixedColorB = blue, mixWeight = 0.5f)
+        val mixedTint = GlassColorOps.effectiveGlassTint(mixedSettings)
+        assertEquals(127f / 255f, mixedTint[0], 0.01f)
+        assertEquals(0f, mixedTint[1], 0.001f)
+        assertEquals(127f / 255f, mixedTint[2], 0.01f)
+        assertEquals(1f, mixedTint[3], 0.001f)
+    }
+
+    @Test
+    fun testParallaxFilterAnglesFromGravity() {
+        val (p0, r0) = ParallaxFilter.anglesFromGravity(0f, 0f, 9.81f)
+        assertEquals(0f, p0, 0.001f)
+        assertEquals(0f, r0, 0.001f)
+
+        val (p1, r1) = ParallaxFilter.anglesFromGravity(9.81f, 0f, 0f)
+        assertEquals(0f, p1, 0.001f)
+        assertTrue(r1 > 1.5f)
     }
 }

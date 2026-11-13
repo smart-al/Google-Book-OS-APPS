@@ -176,6 +176,9 @@ class LiquidGlassRenderer(context: Context) {
         shader.setFloatUniform("panel", panelX, panelY, panelW, panelH)
         shader.setFloatUniform("clockInFront", if (settings.clockInFront) 1f else 0f)
         shader.setFloatUniform("glassBlend", settings.glassBlend.coerceIn(0f, 1f))
+        val baseColor = GlassColorOps.effectiveGlassTint(settings)
+        shader.setFloatUniform("baseColor", baseColor[0], baseColor[1], baseColor[2], baseColor[3])
+
         canvas.drawRect(0f, 0f, surfaceW.toFloat(), surfaceH.toFloat(), paint)
     }
 

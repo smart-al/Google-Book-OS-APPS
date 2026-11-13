@@ -23,6 +23,7 @@ uniform float  time;           // seconds
 uniform float4 panel;          // glass panel: x, y, w, h (px)
 uniform float  clockInFront;   // 0 = behind subject, 1 = floating in front
 uniform float  glassBlend;     // 0 = seamless image blend, 1 = frosted glass
+uniform float4 baseColor; // RGBA tint for glass panel
 
 const float ZERO_PLANE = 0.35;  // depth value that stays "on screen"
 
@@ -119,6 +120,7 @@ half4 main(float2 frag) {
         half3 ambientTint = photoAt(pc);
         half3 glass = mix(imageUnder, blur, half(0.25 + 0.65 * glassBlend));
         glass = mix(glass, glass * (ambientTint * 0.75 + 0.35), half(0.28));
+        glass = mix(glass, glass * half3(baseColor.rgb), half(0.55 * baseColor.a));
 
         // Specular rim highlight (brighter toward the light)
         float rimBand = smoothstep(-3.0 * unit, 0.0, sd) * (1.0 - smoothstep(0.0, 1.5 * unit, sd));

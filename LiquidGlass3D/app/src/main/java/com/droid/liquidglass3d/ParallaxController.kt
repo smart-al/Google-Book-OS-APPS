@@ -9,7 +9,9 @@ import android.hardware.display.DisplayManager
 import android.view.Display
 import android.view.Surface
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.exp
+import kotlin.math.sqrt
 
 /**
  * Blends two parallax sources into one smoothed (x, y) tilt in -1..1:
@@ -22,7 +24,11 @@ import kotlin.math.exp
 class ParallaxController(context: Context) : SensorEventListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val rotationSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+    private val activeSensor: Sensor? =
+        sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+            ?: sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val displayManager = appContext.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
 
     private val rot = FloatArray(9)
@@ -35,10 +41,10 @@ class ParallaxController(context: Context) : SensorEventListener {
     val x: Float get() = filter.x
     val y: Float get() = filter.y
 
-    val hasSensor: Boolean get() = rotationSensor != null
+    val hasSensor: Boolean get() = activeSensor != null
 
     fun start() {
-        rotationSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        activeSensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
         baseline = null
     }
 
@@ -61,27 +67,47 @@ class ParallaxController(context: Context) : SensorEventListener {
     fun step(dtSeconds: Float) { filter.step(dtSeconds) }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
-        SensorManager.getRotationMatrixFromVector(rot, event.values)
-
-        // Compensate for display rotation (landscape laptops / convertibles).
-        val (ax, ay) = when (displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation) {
-            Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
-            Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
-            Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
-            else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+        val displayRotation = displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+        val pitch: Float
+        val roll: Float
+        when (event.sensor.type) {
+            Sensor.TYPE_ROTATION_VECTOR,
+            Sensor.TYPE_GAME_ROTATION_VECTOR -> {
+                SensorManager.getRotationMatrixFromVector(rot, event.values)
+                val (ax, ay) = when (displayRotation) {
+                    Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
+                    Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
+                    Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
+                    else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+                }
+                SensorManager.remapCoordinateSystem(rot, ax, ay, remapped)
+                SensorManager.getOrientation(remapped, orient) // [azimuth, pitch, roll]
+                pitch = orient[1]
+                roll = orient[2]
+            }
+            Sensor.TYPE_GRAVITY,
+            Sensor.TYPE_ACCELEROMETER -> {
+                val (gx, gy) = when (displayRotation) {
+                    Surface.ROTATION_90 -> -event.values[1] to event.values[0]
+                    Surface.ROTATION_180 -> -event.values[0] to -event.values[1]
+                    Surface.ROTATION_270 -> event.values[1] to -event.values[0]
+                    else -> event.values[0] to event.values[1]
+                }
+                val (p, r) = ParallaxFilter.anglesFromGravity(gx, gy, event.values[2])
+                pitch = p
+                roll = r
+            }
+            else -> return
         }
-        SensorManager.remapCoordinateSystem(rot, ax, ay, remapped)
-        SensorManager.getOrientation(remapped, orient) // [azimuth, pitch, roll]
 
-        val b = baseline ?: floatArrayOf(orient[1], orient[2]).also { baseline = it }
+        val b = baseline ?: floatArrayOf(pitch, roll).also { baseline = it }
         // Slowly re-center so the resting hold posture is "neutral".
-        b[0] += (orient[1] - b[0]) * 0.002f
-        b[1] += (orient[2] - b[1]) * 0.002f
+        b[0] += (pitch - b[0]) * 0.0015f
+        b[1] += (roll - b[1]) * 0.0015f
 
-        val range = (PI / 9).toFloat() // ±20° = full deflection
-        val targetX = ((orient[2] - b[1]) / range).coerceIn(-1f, 1f)
-        val targetY = ((orient[1] - b[0]) / range).coerceIn(-1f, 1f)
+        val range = (PI / 12).toFloat() // ±15° = full deflection for responsive laptop/tablet tilt
+        val targetX = ((roll - b[1]) / range).coerceIn(-1f, 1f)
+        val targetY = ((pitch - b[0]) / range).coerceIn(-1f, 1f)
         filter.onSensorTarget(targetX, -targetY)
     }
 
@@ -141,5 +167,13 @@ class ParallaxFilter {
         val k = 1f - exp(-dtSeconds * 12f)
         x += (tx.coerceIn(-1f, 1f) - x) * k
         y += (ty.coerceIn(-1f, 1f) - y) * k
+    }
+
+    companion object {
+        fun anglesFromGravity(gx: Float, gy: Float, gz: Float): Pair<Float, Float> {
+            val pitch = atan2(gy, sqrt(gx * gx + gz * gz))
+            val roll = atan2(gx, sqrt(gy * gy + gz * gz))
+            return pitch to roll
+        }
     }
 }

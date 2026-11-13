@@ -39,6 +39,10 @@ class LiquidGlassRobolectricTest {
             clockColorPreset = ClockColorPreset.SOLAR_FLARE,
             clockFont = ClockFont.MODERN,
             showDate = false,
+            solidColor = 0xFF1E88E5.toInt(),
+            mixedColorA = 0xFFE53935.toInt(),
+            mixedColorB = 0xFF00F5D4.toInt(),
+            mixWeight = 0.5f,
         )
 
         SceneStore.saveSettings(context, updated)
@@ -56,6 +60,10 @@ class LiquidGlassRobolectricTest {
         assertEquals(updated.clockColorPreset, loaded.clockColorPreset)
         assertEquals(updated.clockFont, loaded.clockFont)
         assertEquals(updated.showDate, loaded.showDate)
+        assertEquals(updated.solidColor, loaded.solidColor)
+        assertEquals(updated.mixedColorA, loaded.mixedColorA)
+        assertEquals(updated.mixedColorB, loaded.mixedColorB)
+        assertEquals(updated.mixWeight, loaded.mixWeight, 0.001f)
     }
 
     @Test

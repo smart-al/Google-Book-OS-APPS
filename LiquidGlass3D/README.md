@@ -31,16 +31,16 @@ Using on-device monocular depth estimation, multi-model AI subject segmentation,
 - **Movable Clock Widget with Desktop Mouse Dragging**
   - Directly click and drag the clock anywhere across the screen using your mouse or touch.
   - Includes precision position sliders (X, Y) and a quick one-tap **Center** button.
-- **36 Rich Color & Gradient Themes**
-  - 8 Solid Glass Tones (*Pure White, Ice Cyan, Soft Gold, Rose Quartz, Mint Glass, Electric Violet, Neon Coral, Obsidian*).
+- **44 Rich Color & Gradient Themes + Custom Mix-and-Match Tint**
+  - 16 Solid Glass Tones (*Pure White, Ice Cyan, Soft Gold, Rose Quartz, Mint Glass, Electric Violet, Neon Coral, Obsidian, Crimson Ruby, Cobalt Blue, Emerald Green, Tangerine, Soft Lavender, Deep Teal, Warm Amber, Cool Slate*).
   - 28 Multi-Stop Liquid Gradients (*Cyberpunk, Sunset Glow, Aurora, Solar Flare, Bioluminescent Abyss, Sakura Blossom, Retro Arcade, Polar Aurora, Cyber Matrix, Mariana Trench, Cotton Candy, Prism Spectrum*, and more).
+  - **Custom Glass Tint & Mix**: Pick any `Base`, `Mix A`, and `Mix B` color and blend them at any ratio (`0%–100%`) in real time.
 - **Google Book OS 16:10 Laptop Display Optimization**
   - Live preview locked to standard **16:10 aspect ratio** (e.g. 2560×1600, 1920×1200).
   - Adaptive dual-pane desktop layout (`>= 840.dp`) with responsive Material 3 controls.
-- **Dual-Input Parallax Engine**
-  - Hardware gyroscope & lid tilt via `Sensor.TYPE_ROTATION_VECTOR` when tilting or moving the screen.
-  - Smooth desktop trackpad / mouse pointer hover blending (`onTouchEvent` & `ACTION_HOVER_MOVE`).
-  - Wallpaper page scroll integration (`onOffsetsChanged`).
+- **Multi-Input Parallax Engine**
+  - Hardware tilt via `TYPE_ROTATION_VECTOR`, `TYPE_GAME_ROTATION_VECTOR`, `TYPE_GRAVITY`, or `TYPE_ACCELEROMETER` when moving/tilting the device.
+  - Touch / drag input on the live wallpaper (`onTouchEvent`), wallpaper page scroll (`onOffsetsChanged`), and mouse hover + drag in the in-app preview.
 - **Built-in Sample 3D Scene**
   - One-tap **"Try Sample Scene"** button allows testing the 3D depth parallax, moving clock, and shader refraction instantly without needing to pick a file first.
 
