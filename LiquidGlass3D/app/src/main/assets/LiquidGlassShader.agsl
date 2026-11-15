@@ -36,6 +36,60 @@ float  depthAt(float2 p) { return depthTex.eval(clampP(p)).r; }
 float  maskAt(float2 p)  { return maskTex.eval(clampP(p)).r; }
 half3  photoAt(float2 p) { return photo.eval(clampP(p)).rgb; }
 
+// Morphological closing approximation + edge-aware glow bridge in shader space:
+// keeps bright glowing appendages (e.g. Link's glowing cyan arm) fused to the subject mask.
+float closedMaskAt(float2 p, float unit) {
+    float c = maskAt(p);
+    float r1 = 5.0 * unit;
+    float r2 = 11.0 * unit;
+    float d1 = max(max(maskAt(p + float2(r1, 0.0)), maskAt(p - float2(r1, 0.0))),
+                   max(maskAt(p + float2(0.0, r1)), maskAt(p - float2(0.0, r1))));
+    float d2 = max(max(maskAt(p + float2(r2, r2)), maskAt(p - float2(r2, r2))),
+                   max(maskAt(p + float2(r2, -r2)), maskAt(p - float2(r2, -r2))));
+    float dilated = max(c, max(d1, d2 * 0.92));
+    half3 rgb = photoAt(p);
+    float lum = dot(float3(rgb), float3(0.299, 0.587, 0.114));
+    float cyanGlow = max(0.0, min(float(rgb.g), float(rgb.b)) - float(rgb.r) * 0.65);
+    float glowBridge = clamp((cyanGlow * 1.8 + max(0.0, lum - 0.55)) * step(0.22, dilated), 0.0, 1.0);
+    return clamp(max(c, mix(c, dilated, 0.45 + 0.50 * glowBridge)), 0.0, 1.0);
+}
+
+// Tri-layer scene depth:
+//  - Primary foreground subject (closedMask) -> popped near Z-plane (~0.88..0.96)
+//  - Main cliff/terrain anchor plane -> plateau-locked to ZERO_PLANE (0.35, zero parallax drift)
+//  - Small isolated mid-sky elements (birds / floating leaves) -> aerial mid-sky plane (~0.18)
+//  - Distant sky & clouds -> deep recessed background plane (0.0..0.11)
+float sceneDepthAt(float2 p, float unit) {
+    float rawD = depthAt(p);
+    float fg = smoothstep(0.20, 0.65, closedMaskAt(p, unit));
+    float probe = 24.0 * unit;
+    float dSurround = 0.25 * (
+        depthAt(p + float2(probe, 0.0)) +
+        depthAt(p - float2(probe, 0.0)) +
+        depthAt(p + float2(0.0, probe)) +
+        depthAt(p - float2(0.0, probe))
+    );
+
+    // Detect small isolated mid-sky elements (birds, floating leaves) surrounded by open sky
+    float openSky = 1.0 - smoothstep(0.24, 0.38, dSurround);
+    float isolatedBlob = smoothstep(0.03, 0.12, rawD - dSurround) * openSky * (1.0 - fg);
+
+    // Plateau-lock continuous mid-ground cliff/terrain around ZERO_PLANE (0.35) for zero drift
+    float terrainBand = (1.0 - smoothstep(0.0, 0.20, abs(rawD - ZERO_PLANE))) * step(0.24, dSurround);
+    float bgD = mix(rawD, ZERO_PLANE, 0.85 * terrainBand);
+
+    // Push distant open sky into a deep parallax layer
+    float deepSky = (1.0 - smoothstep(0.16, 0.28, rawD)) * openSky;
+    bgD = mix(bgD, rawD * 0.42, deepSky);
+
+    // Decouple isolated mid-sky birds/leaves from the rock layer onto an aerial plane
+    bgD = mix(bgD, 0.18, isolatedBlob);
+
+    // Fuse foreground character onto a unified high-pop Z-plane so glowing arms never tear
+    float fgTarget = max(rawD, 0.88 + 0.07 * popOut3d);
+    return mix(bgD, fgTarget, fg);
+}
+
 float sdRoundBox(float2 p, float2 b, float r) {
     float2 q = abs(p) - b + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
@@ -46,50 +100,83 @@ half4 main(float2 frag) {
     float2 center = res * 0.5;
 
     // ---- 1. Depth-driven UV displacement (depth - 0.35) ------------------
-    float zoom = 1.0 + 0.07 * depthIntensity * spatial;     // hide revealed borders
+    float zoom = 1.0 + 0.075 * depthIntensity * spatial;    // hide revealed borders
     float2 base = (frag - center) / zoom + center;
-    float reach = res.y * (0.045 + 0.008 * popOut3d) * depthIntensity * spatial;
+    float reach = res.y * (0.054 + 0.016 * popOut3d) * depthIntensity * spatial;
     float2 idleOrbit = float2(sin(time * 0.75), cos(time * 0.55)) * 0.05 * popOut3d * spatial;
     float2 off = clamp(float2(tilt.x, tilt.y) + idleOrbit, float2(-1.1), float2(1.1));
 
-    // Iterative parallax mapping: re-read depth at the displaced coordinate so
-    // foreground subjects "pop" forward and backgrounds recess without tearing.
+    // Iterative parallax mapping using tri-layer sceneDepthAt:
+    // Foreground pops cleanly, cliff anchor stays stationary at ZERO_PLANE, sky recedes deeply.
     float2 p = base;
-    float d = depthAt(p);
+    float d = sceneDepthAt(p, unit);
     for (int i = 0; i < 4; i++) {
         p = base + off * (d - ZERO_PLANE) * reach;
-        d = depthAt(p);
+        d = sceneDepthAt(p, unit);
     }
     p = clampP(p);
 
     // ---- 2. Foreground edge + surface normal -----------------------------
     float e = 3.0 * unit + 1.0;
-    float mx = maskAt(p + float2(e, 0)) - maskAt(p - float2(e, 0));
-    float my = maskAt(p + float2(0, e)) - maskAt(p - float2(0, e));
+    float fgCenter = closedMaskAt(p, unit);
+    float mx = closedMaskAt(p + float2(e, 0), unit) - closedMaskAt(p - float2(e, 0), unit);
+    float my = closedMaskAt(p + float2(0, e), unit) - closedMaskAt(p - float2(0, e), unit);
     float2 g = float2(mx, my);
-    float edge = clamp(length(g) * 1.2, 0.0, 1.0);
+    float edge = clamp(length(g) * 1.25, 0.0, 1.0);
     float2 edgeDir = g / max(length(g), 1e-4);
 
     float dx = depthAt(p + float2(e, 0)) - depthAt(p - float2(e, 0));
     float dy = depthAt(p + float2(0, e)) - depthAt(p - float2(0, e));
-    float3 n = normalize(float3(-dx * 6.0, -dy * 6.0, 1.0));
+    float3 n = normalize(float3(-dx * 6.5, -dy * 6.5, 1.0));
 
-    // ---- 3. Chromatic dispersion + Living Background animation ----------
-    float fgSoft = smoothstep(0.25, 0.65, maskAt(p));
+    // ---- 3. Terrain vs. Sky separation + Mid-Sky Particle Wind Drift -----
+    float fgSoft = smoothstep(0.22, 0.62, fgCenter);
     // Keep the moving background glued to the subject: fade motion out near its edges
     float ring = 16.0 * unit;
     float nearFg = max(max(maskAt(p + float2(ring, 0)), maskAt(p - float2(ring, 0))),
                        max(maskAt(p + float2(0, ring)), maskAt(p - float2(0, ring))));
     float edgeGuard = 1.0 - smoothstep(0.15, 0.6, max(nearFg, fgSoft));
-    float bgMask = edgeGuard * livingEnabled * livingIntensity;
+
+    // Regional surround check to separate static cliff terrain from sky & isolated mid-sky particles
+    float skyProbe = 26.0 * unit;
+    float dSurround = 0.25 * (
+        depthAt(p + float2(skyProbe, 0.0)) +
+        depthAt(p - float2(skyProbe, 0.0)) +
+        depthAt(p + float2(0.0, skyProbe)) +
+        depthAt(p - float2(0.0, skyProbe))
+    );
+    half3 colCenter = photoAt(p);
+    half3 colSurround = 0.25 * (
+        photoAt(p + float2(skyProbe, 0.0)) +
+        photoAt(p - float2(skyProbe, 0.0)) +
+        photoAt(p + float2(0.0, skyProbe)) +
+        photoAt(p - float2(0.0, skyProbe))
+    );
+    float lumDiff = abs(dot(float3(colCenter - colSurround), float3(0.299, 0.587, 0.114)));
     float2 uv = p / max(res, float2(1.0));
+
+    // Stationary cliff/terrain anchor guard: rock masses near ZERO_PLANE stay stationary
+    float openSkyMask = (1.0 - smoothstep(0.24, 0.36, dSurround)) * smoothstep(0.88, 0.16, uv.y);
+
+    // Isolated mid-sky elements (birds and floating leaves): small features contrasted against open sky
+    float rawLocalD = depthAt(p);
+    float midSkySprite = edgeGuard * openSkyMask *
+        clamp(smoothstep(0.05, 0.18, lumDiff) + smoothstep(0.03, 0.12, rawLocalD - dSurround), 0.0, 1.0);
+    float2 windDrift = float2(
+        sin(time * 1.65 + uv.y * 13.0 + uv.x * 8.0) * 6.5,
+        cos(time * 2.15 + uv.x * 16.0 - uv.y * 10.0) * 3.5
+    ) * unit * midSkySprite * max(spatial, livingEnabled);
+
+    float2 pSample = clampP(p + windDrift);
+    float bgMask = edgeGuard * livingEnabled * livingIntensity;
     float2 bgDelta = float2(0.0);
     float bgShimmer = 0.0;
     half3 col;
 
     if (bgMask > 0.001 && livingMode < 0.5) {
-        // Mode 0: Clouds & Sky — dual-phase continuous flow advection so clouds visibly drift
-        float skyZone = smoothstep(0.88, 0.18, uv.y) * bgMask;
+        // Mode 0: Clouds & Sky — dual-phase continuous flow advection restricted to open sky
+        // so the cliff/terrain anchor plane remains stationary (zero drift).
+        float skyZone = openSkyMask * bgMask * (1.0 - 0.65 * midSkySprite);
         float flowSpeed = 0.18;
         float p0 = fract(time * flowSpeed);
         float p1 = fract(time * flowSpeed + 0.5);
@@ -99,60 +186,77 @@ half4 main(float2 frag) {
 
         float2 off0 = float2((p0 - 0.5) * travel, billow * (1.0 - p0));
         float2 off1 = float2((p1 - 0.5) * travel, billow * (1.0 - p1));
-        half3 c0 = photoAt(p - off0);
-        half3 c1 = photoAt(p - off1);
+        half3 c0 = photoAt(pSample - off0);
+        half3 c1 = photoAt(pSample - off1);
         half3 cloudFlow = mix(c0, c1, half(blendW));
 
         float disp = refraction * edge * 2.5 * unit * (0.6 + 0.4 * spatial);
-        col.r = mix(photoAt(p + edgeDir * disp).r, cloudFlow.r, half(skyZone));
-        col.g = mix(photoAt(p).g, cloudFlow.g, half(skyZone));
-        col.b = mix(photoAt(p - edgeDir * disp).b, cloudFlow.b, half(skyZone));
+        col.r = mix(photoAt(pSample + edgeDir * disp).r, cloudFlow.r, half(skyZone));
+        col.g = mix(photoAt(pSample).g, cloudFlow.g, half(skyZone));
+        col.b = mix(photoAt(pSample - edgeDir * disp).b, cloudFlow.b, half(skyZone));
         bgShimmer = max(0.0, sin(uv.x * 8.0 - time * 0.9 + uv.y * 4.0)) * 0.03 * skyZone;
     } else {
         if (bgMask > 0.001) {
+            // Dampen motion on the stationary cliff/terrain anchor plane
+            float nonTerrainMask = bgMask * (1.0 - 0.80 * (1.0 - openSkyMask) * step(0.24, rawLocalD));
             if (livingMode < 1.5) {
                 // Mode 1: Ocean & Water — visible directional wave ripples + sunlight glints
                 float waterZone = smoothstep(0.25, 0.70, uv.y);
                 float w1 = sin(uv.y * 38.0 - time * 2.6 + uv.x * 11.0);
                 float w2 = cos(uv.y * 24.0 + time * 1.9 - uv.x * 16.0);
-                bgDelta = float2((w1 * 11.0 + w2 * 6.0) * unit, (w1 * 4.5 - w2 * 3.0) * unit) * waterZone * bgMask;
-                bgShimmer = pow(max(0.0, w1 * 0.5 + w2 * 0.5), 3.0) * 0.09 * waterZone * bgMask;
+                bgDelta = float2((w1 * 11.0 + w2 * 6.0) * unit, (w1 * 4.5 - w2 * 3.0) * unit) * waterZone * nonTerrainMask;
+                bgShimmer = pow(max(0.0, w1 * 0.5 + w2 * 0.5), 3.0) * 0.09 * waterZone * nonTerrainMask;
             } else if (livingMode < 2.5) {
-                // Mode 2: Nature Breeze — organic wind gusts across foliage & landscape
+                // Mode 2: Nature Breeze — organic wind gusts across foliage & sky particles
                 float gust = sin(uv.x * 14.0 + uv.y * 9.0 - time * 1.8) * 0.65
                            + cos(uv.x * 7.0 - uv.y * 11.0 + time * 1.3) * 0.35;
-                bgDelta = float2(gust * 14.0 * unit, sin(uv.x * 10.0 + time * 1.4) * 5.0 * unit) * bgMask;
+                bgDelta = float2(gust * 14.0 * unit, sin(uv.x * 10.0 + time * 1.4) * 5.0 * unit) * nonTerrainMask;
             } else {
                 // Mode 3: Living Aura — gentle ambient breath + floating bokeh motes
                 float breath = sin(time * 1.1 + uv.y * 4.0) * 6.0 * unit;
-                bgDelta = float2(breath * cos(uv.x * 5.0), breath * 0.7) * bgMask;
+                bgDelta = float2(breath * cos(uv.x * 5.0), breath * 0.7) * nonTerrainMask;
                 float2 cell = fract(uv * float2(10.0, 6.25) + float2(time * 0.06, -time * 0.09)) - 0.5;
                 float mote = smoothstep(0.24, 0.02, length(cell));
-                bgShimmer = mote * 0.09 * (0.5 + 0.5 * sin(time * 2.0 + uv.x * 20.0)) * bgMask;
+                bgShimmer = mote * 0.09 * (0.5 + 0.5 * sin(time * 2.0 + uv.x * 20.0)) * nonTerrainMask;
             }
         }
 
-        float2 pCol = clampP(p + bgDelta);
+        float2 pCol = clampP(pSample + bgDelta);
         float disp = refraction * edge * 2.5 * unit * (0.6 + 0.4 * spatial);
         col.r = photoAt(pCol + edgeDir * disp).r;
         col.g = photoAt(pCol).g;
         col.b = photoAt(pCol - edgeDir * disp).b;
     }
 
-    // ---- 3b. 3DS Pop-Out: subtle cast shadow only (no duplicated subject layer) -
-    if (popOut3d * spatial > 0.5) {
-        float2 shadowOffset = off * 9.0 * unit + float2(3.0, 5.0) * unit;
-        float shadowMask = maskAt(p - shadowOffset) * (1.0 - fgSoft);
-        col *= half(1.0 - 0.14 * shadowMask);
+    // ---- 3b. 3D Pop & Rim Separation: Ambient Occlusion + Drop-Shadow ----
+    if (spatial > 0.01) {
+        float bgOnly = 1.0 - fgSoft;
+        // Soft contact Ambient Occlusion (AO) halo right behind the foreground cutout
+        float aoRad = 11.0 * unit;
+        float aoRing = 0.25 * (
+            closedMaskAt(p + float2(aoRad, 0.0), unit) +
+            closedMaskAt(p - float2(aoRad, 0.0), unit) +
+            closedMaskAt(p + float2(0.0, aoRad), unit) +
+            closedMaskAt(p - float2(0.0, aoRad), unit)
+        );
+        float contactAo = aoRing * bgOnly * (0.10 + 0.05 * popOut3d) * clamp(depthIntensity, 0.3, 1.5);
+
+        // Multi-tap parallax-reactive drop-shadow behind the foreground cutout
+        float2 shadowOffset = (off * 14.0 + float2(4.0, 6.5)) * unit * (0.65 + 0.35 * popOut3d);
+        float dropNear = closedMaskAt(p - shadowOffset * 0.65, unit);
+        float dropFar  = closedMaskAt(p - shadowOffset * 1.15, unit);
+        float dropShadow = (0.6 * dropNear + 0.4 * dropFar) * bgOnly * (0.12 + 0.08 * popOut3d) * clamp(depthIntensity, 0.3, 1.5);
+
+        col *= half(clamp(1.0 - (contactAo + dropShadow), 0.68, 1.0));
     }
 
-    // ---- 4. Dynamic specular sheen on the subject ------------------------
+    // ---- 4. Dynamic specular sheen + 3D Rim Separation on the subject ----
     float3 L = normalize(float3(-tilt.x * 0.9 + 0.25 * sin(time * 0.4),
                                 -tilt.y * 0.9 - 0.35, 0.65));
     float3 H = normalize(L + float3(0, 0, 1));
     float spec = pow(max(dot(n, H), 0.0), 36.0);
     float sheen = spec * refraction * (0.35 + 1.6 * edge + 0.5 * fgSoft);
-    float rim = edge * refraction * 0.18 * (0.5 + 0.5 * dot(normalize(edgeDir + 1e-4), L.xy));
+    float rim = edge * (0.14 * spatial + 0.16 * refraction) * (0.55 + 0.45 * dot(normalize(edgeDir + 1e-4), L.xy)) * (0.4 + 0.6 * fgSoft);
     col += half3(sheen + rim + bgShimmer);
 
     // ---- 5. Frosted Liquid-Glass panel (sandwiched behind the subject) ----
@@ -213,7 +317,7 @@ half4 main(float2 frag) {
     }
 
     // ---- 6. Depth occlusion: the subject sits in front of the glass -------
-    float fg = smoothstep(0.45, 0.55, maskAt(p));
+    float fg = smoothstep(0.42, 0.56, fgCenter);
     float inFront = step(ZERO_PLANE, d) * (1.0 - clockInFront);            // only truly-near pixels occlude
     result = mix(result, col, half(fg * inFront));
 

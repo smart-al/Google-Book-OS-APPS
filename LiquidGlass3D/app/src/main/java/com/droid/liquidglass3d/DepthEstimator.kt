@@ -61,14 +61,14 @@ class DepthEstimator(
         withContext(Dispatchers.Default) {
             val w = photo.width
             val h = photo.height
+            val photoPixels = IntArray(w * h).also { photo.getPixels(it, 0, w, 0, 0, w, h) }
 
             onStage("Estimating 3D depth…")
-            val depthGray = estimateDepth(photo)
-            val natureMask = buildNatureDepthMask(depthGray, w, h)
+            val rawDepthGray = estimateDepth(photo)
 
             onStage("Analyzing scene (Person / Object / Nature)…")
             val (selfieMask, isPortrait) = estimateSelfie(photo)
-            val (u2netMask, isObject) = estimateU2Net(photo)
+            val (u2netRawMask, isObject) = estimateU2Net(photo)
 
             val detectedMode = when {
                 isPortrait -> MaskMode.PORTRAIT
@@ -77,9 +77,20 @@ class DepthEstimator(
             }
 
             // Portrait mask blends Selfie Multiclass (fine hair/head) with U²-Net (crisp garment edges)
-            val portraitMask = FloatArray(w * h) { i ->
-                (0.35f * selfieMask[i] + 0.65f * u2netMask[i]).coerceIn(0f, 255f)
+            val rawPortraitMask = FloatArray(w * h) { i ->
+                (0.35f * selfieMask[i] + 0.65f * u2netRawMask[i]).coerceIn(0f, 255f)
             }
+
+            onStage("Refining foreground mask & depth layers…")
+            val portraitMask = DepthOps.refineForegroundMask(rawPortraitMask, photoPixels, w, h)
+            val u2netMask = DepthOps.refineForegroundMask(u2netRawMask, photoPixels, w, h)
+            val primaryFgMask = when (detectedMode) {
+                MaskMode.PORTRAIT -> portraitMask
+                MaskMode.OBJECT -> u2netMask
+                else -> u2netMask
+            }
+            val depthGray = DepthOps.postProcessDepth(rawDepthGray, primaryFgMask, w, h)
+            val natureMask = buildNatureDepthMask(depthGray, w, h)
 
             onStage("Caching AI masks (${detectedMode.label})…")
             val depthBmp = grayToBitmap(depthGray, w, h)
@@ -393,6 +404,7 @@ object DepthOps {
     }
 
     fun boxBlur(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+        if (w <= 0 || h <= 0 || r <= 0 || src.size < w * h) return src.copyOf()
         val tmp = FloatArray(src.size); val out = FloatArray(src.size)
         val k = 2 * r + 1
         for (y in 0 until h) {
@@ -410,6 +422,261 @@ object DepthOps {
                 out[y * w + x] = acc / k
                 acc += tmp[(y + r + 1).coerceIn(0, h - 1) * w + x] - tmp[(y - r).coerceIn(0, h - 1) * w + x]
             }
+        }
+        return out
+    }
+
+    /** Separable 2D morphological dilation (sliding window maximum) over a `(2r+1)x(2r+1)` kernel. */
+    fun morphDilate(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+        if (w <= 0 || h <= 0 || r <= 0 || src.size < w * h) return src.copyOf()
+        val tmp = FloatArray(w * h)
+        val out = FloatArray(w * h)
+        for (y in 0 until h) {
+            val row = y * w
+            for (x in 0 until w) {
+                var m = Float.NEGATIVE_INFINITY
+                val x0 = max(0, x - r)
+                val x1 = min(w - 1, x + r)
+                for (kx in x0..x1) {
+                    val v = src[row + kx]
+                    if (v > m) m = v
+                }
+                tmp[row + x] = m
+            }
+        }
+        for (x in 0 until w) {
+            for (y in 0 until h) {
+                var m = Float.NEGATIVE_INFINITY
+                val y0 = max(0, y - r)
+                val y1 = min(h - 1, y + r)
+                for (ky in y0..y1) {
+                    val v = tmp[ky * w + x]
+                    if (v > m) m = v
+                }
+                out[y * w + x] = m
+            }
+        }
+        return out
+    }
+
+    /** Separable 2D morphological erosion (sliding window minimum) over a `(2r+1)x(2r+1)` kernel. */
+    fun morphErode(src: FloatArray, w: Int, h: Int, r: Int): FloatArray {
+        if (w <= 0 || h <= 0 || r <= 0 || src.size < w * h) return src.copyOf()
+        val tmp = FloatArray(w * h)
+        val out = FloatArray(w * h)
+        for (y in 0 until h) {
+            val row = y * w
+            for (x in 0 until w) {
+                var m = Float.POSITIVE_INFINITY
+                val x0 = max(0, x - r)
+                val x1 = min(w - 1, x + r)
+                for (kx in x0..x1) {
+                    val v = src[row + kx]
+                    if (v < m) m = v
+                }
+                tmp[row + x] = m
+            }
+        }
+        for (x in 0 until w) {
+            for (y in 0 until h) {
+                var m = Float.POSITIVE_INFINITY
+                val y0 = max(0, y - r)
+                val y1 = min(h - 1, y + r)
+                for (ky in y0..y1) {
+                    val v = tmp[ky * w + x]
+                    if (v < m) m = v
+                }
+                out[y * w + x] = m
+            }
+        }
+        return out
+    }
+
+    /**
+     * Morphological closing (`erode(dilate(src, dilateRadius), erodeRadius)`).
+     * Bridges internal holes and fuses glowing limbs/weapons attached to the foreground silhouette.
+     */
+    fun morphClose(
+        src: FloatArray,
+        w: Int,
+        h: Int,
+        dilateRadius: Int,
+        erodeRadius: Int = dilateRadius,
+    ): FloatArray {
+        val dilated = morphDilate(src, w, h, dilateRadius)
+        return morphErode(dilated, w, h, erodeRadius)
+    }
+
+    /**
+     * Fast O(N) edge-aware Guided Image Filter (He et al.).
+     * Aligns [mask] (`0..255`) to structural boundaries in [guide] (`0..1` or `0..255`).
+     */
+    fun guidedFilter(
+        mask: FloatArray,
+        guide: FloatArray,
+        w: Int,
+        h: Int,
+        r: Int,
+        eps: Float = 1e-3f,
+    ): FloatArray {
+        val n = w * h
+        if (w <= 0 || h <= 0 || r <= 0 || mask.size < n || guide.size < n) return mask.copyOf()
+        var maxG = 0f
+        for (i in 0 until n) if (guide[i] > maxG) maxG = guide[i]
+        val gScale = if (maxG > 1.5f) 1f / 255f else 1f
+        val normI = FloatArray(n) { (guide[it] * gScale).coerceIn(0f, 1f) }
+        val p = FloatArray(n) { (mask[it] / 255f).coerceIn(0f, 1f) }
+
+        val meanI = boxBlur(normI, w, h, r)
+        val meanP = boxBlur(p, w, h, r)
+        val ii = FloatArray(n) { normI[it] * normI[it] }
+        val ip = FloatArray(n) { normI[it] * p[it] }
+        val corrI = boxBlur(ii, w, h, r)
+        val corrIP = boxBlur(ip, w, h, r)
+
+        val a = FloatArray(n)
+        val b = FloatArray(n)
+        val safeEps = max(eps, 1e-6f)
+        for (i in 0 until n) {
+            val varI = max(0f, corrI[i] - meanI[i] * meanI[i])
+            val covIP = corrIP[i] - meanI[i] * meanP[i]
+            val ai = covIP / (varI + safeEps)
+            a[i] = ai
+            b[i] = meanP[i] - ai * meanI[i]
+        }
+
+        val meanA = boxBlur(a, w, h, r)
+        val meanB = boxBlur(b, w, h, r)
+        return FloatArray(n) { ((meanA[it] * normI[it] + meanB[it]) * 255f).coerceIn(0f, 255f) }
+    }
+
+    /**
+     * Applies morphological dilation/closing + glow-limb bridging + edge-aware guided filtering
+     * so bright glowing areas attached to a character (e.g., Link's glowing cyan arm or bright
+     * weapon aura) stay fused to the foreground subject mask instead of dropping into the sky.
+     */
+    fun refineForegroundMask(
+        rawMask: FloatArray,
+        pixels: IntArray?,
+        w: Int,
+        h: Int,
+    ): FloatArray {
+        val n = w * h
+        if (w <= 0 || h <= 0 || rawMask.size < n) return rawMask.copyOf()
+        val rDilate = max(2, min(w, h) / 68)
+        val rErode = max(1, rDilate - 1)
+        val dilated = morphDilate(rawMask, w, h, rDilate)
+        val closed = morphErode(dilated, w, h, rErode)
+
+        val guide = FloatArray(n)
+        val bridged = closed.copyOf()
+
+        if (pixels != null && pixels.size >= n) {
+            for (i in 0 until n) {
+                val c = pixels[i]
+                val r = ((c ushr 16) and 0xFF) / 255f
+                val g = ((c ushr 8) and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val maxC = max(r, max(g, b))
+                val minC = min(r, min(g, b))
+                val chroma = maxC - minC
+                val lum = 0.299f * r + 0.587f * g + 0.114f * b
+                val cyanGlow = max(0f, min(g, b) - r * 0.65f)
+                // Edge-aware guide combines luminance and chromatic structure
+                guide[i] = (0.65f * lum + 0.35f * max(chroma, cyanGlow)).coerceIn(0f, 1f)
+
+                // If a pixel sits inside the dilated character attachment halo and has strong
+                // cyan/magic glow or luminous energy, fuse it onto the closed character mask.
+                if (dilated[i] > 48f) {
+                    val isGlowingAttachment = (cyanGlow > 0.18f && lum > 0.42f) ||
+                        (lum > 0.58f && chroma > 0.22f) ||
+                        (lum > 0.80f && dilated[i] > 110f)
+                    if (isGlowingAttachment) {
+                        bridged[i] = max(bridged[i], dilated[i] * 0.94f)
+                    }
+                }
+            }
+        } else {
+            for (i in 0 until n) {
+                guide[i] = (closed[i] / 255f).coerceIn(0f, 1f)
+            }
+        }
+
+        val rGuide = max(2, min(w, h) / 110)
+        val guided = guidedFilter(bridged, guide, w, h, rGuide, eps = 2.0e-3f)
+        return FloatArray(n) { i ->
+            // Retain strong closed core while using guided edges for smooth, tear-free boundaries
+            max(closed[i] * 0.85f, guided[i]).coerceIn(0f, 255f)
+        }
+    }
+
+    /**
+     * Post-processes the monocular depth map (`0..255`, 255 = near) with the refined foreground mask:
+     * 1. Fuses the foreground subject (`fgMask`) to a unified near Z-plane (`>= 220f`) so glowing
+     *    arms/weapons attached to the character never fall into the background sky or tear.
+     * 2. Stabilizes the mid-ground cliff/terrain anchor plane around `ZERO_PLANE` (`89.25f`, `0.35`)
+     *    so the main rock/terrain stays stationary (zero parallax drift).
+     * 3. Pushes distant sky/clouds into a deep parallax layer (`0..32f`) while decoupling small
+     *    isolated mid-sky elements (birds, floating leaves) onto an aerial layer (`~48f`) so they
+     *    aren't frozen to the foreground rock plane.
+     */
+    fun postProcessDepth(
+        depthGray: FloatArray,
+        fgMask: FloatArray,
+        w: Int,
+        h: Int,
+    ): FloatArray {
+        val n = w * h
+        if (w <= 0 || h <= 0 || depthGray.size < n || fgMask.size < n) return depthGray.copyOf()
+
+        // 1. Determine the primary foreground character's near-depth anchor
+        val fgSamples = ArrayList<Float>(n / 4)
+        for (i in 0 until n) {
+            if (fgMask[i] >= 128f) fgSamples.add(depthGray[i])
+        }
+        val fgAnchor = if (fgSamples.isNotEmpty()) {
+            fgSamples.sort()
+            val p75 = fgSamples[(fgSamples.size * 0.75f).toInt().coerceIn(0, fgSamples.lastIndex)]
+            p75.coerceIn(220f, 248f)
+        } else {
+            228f
+        }
+
+        // 2. Regional depth context to separate broad cliff masses from isolated mid-sky particles
+        val regionRadius = max(2, min(w, h) / 20)
+        val regionalDepth = boxBlur(depthGray, w, h, regionRadius)
+        val zeroPlane = 0.35f * 255f // 89.25f
+
+        val out = FloatArray(n)
+        for (i in 0 until n) {
+            val d = depthGray[i].coerceIn(0f, 255f)
+            val m = (fgMask[i] / 255f).coerceIn(0f, 1f)
+            val mSmooth = m * m * (3f - 2f * m)
+            val reg = regionalDepth[i]
+
+            // Background / terrain / sky shaping (outside primary subject)
+            val bgShaped = when {
+                // Small isolated mid-sky element (bird / floating leaf) surrounded by open sky
+                reg < 76f && (d - reg) > 10f -> {
+                    48f // ~0.19 normalized aerial mid-sky plane (decoupled from 0.35 rock plane)
+                }
+                // Distant sky & clouds -> deep parallax layer (0..32f)
+                d < 62f && reg < 78f -> {
+                    d * 0.50f
+                }
+                // Main cliff / terrain anchor plane -> plateau-locked to ZERO_PLANE (89.25f)
+                d in 62f..142f -> {
+                    val dist = kotlin.math.abs(d - zeroPlane) / 53f
+                    val lock = (1f - dist.coerceIn(0f, 1f))
+                    val lockSmooth = lock * lock * (3f - 2f * lock)
+                    d * (1f - 0.78f * lockSmooth) + zeroPlane * (0.78f * lockSmooth)
+                }
+                else -> d
+            }
+
+            // Foreground subject fusion: keep glowing limbs & character silhouette unified at near Z
+            val fgDepth = max(d, fgAnchor)
+            out[i] = (bgShaped * (1f - mSmooth) + fgDepth * mSmooth).coerceIn(0f, 255f)
         }
         return out
     }

@@ -346,4 +346,91 @@ class LiquidGlassUnitTest {
         assertEquals(LivingMotionMode.AURA, NanoBananaExpander.parseMotionModeFromText("AURA"))
         assertEquals(null, NanoBananaExpander.parseMotionModeFromText("unknown"))
     }
+
+    @Test
+    fun testDepthOpsMorphCloseAndGuidedFilter() {
+        val w = 16
+        val h = 16
+        val maskWithGap = FloatArray(w * h) { 0f }
+        // Solid foreground block in center with a 1px hole at (8, 8) and an adjacent glowing cyan arm at (11, 8)
+        for (y in 5..10) {
+            for (x in 5..10) {
+                maskWithGap[y * w + x] = 255f
+            }
+        }
+        maskWithGap[8 * w + 8] = 0f // internal gap
+
+        val closed = DepthOps.morphClose(maskWithGap, w, h, dilateRadius = 2, erodeRadius = 2)
+        assertTrue("Internal hole should be closed to foreground", closed[8 * w + 8] > 240f)
+        assertEquals("Distant background corner should stay 0", 0f, closed[0], 0.01f)
+
+        // Glowing cyan pixel at (11, 8) attached to character vs distant sky at (1, 1)
+        val pixels = IntArray(w * h) { 0xFF87CEEB.toInt() } // sky blue background
+        pixels[8 * w + 11] = 0xFF00FFFF.toInt() // bright glowing cyan arm pixel attached to character
+
+        val refined = DepthOps.refineForegroundMask(maskWithGap, pixels, w, h)
+        assertTrue("Glowing cyan arm attached to character should fuse into mask", refined[8 * w + 11] > 180f)
+        assertTrue("Internal hole should remain fused after refinement", refined[8 * w + 8] > 200f)
+        assertTrue("Distant sky pixel should stay near zero", refined[1 * w + 1] < 15f)
+    }
+
+    @Test
+    fun testDepthOpsPostProcessDepthLayers() {
+        val w = 20
+        val h = 20
+        val rawDepth = FloatArray(w * h)
+        val fgMask = FloatArray(w * h)
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val i = y * w + x
+                if (y < 10) {
+                    // Upper half: distant open sky (raw depth = 30)
+                    rawDepth[i] = 30f
+                } else {
+                    // Lower half: continuous cliff/terrain around 102 (near ZERO_PLANE = 89.25)
+                    rawDepth[i] = 102f
+                }
+            }
+        }
+
+        // Small isolated bird/leaf in the open sky at (5, 4) with raw depth = 95 (would otherwise stick to rock layer)
+        rawDepth[4 * w + 5] = 95f
+
+        // Foreground character at (10..13, 10..13) with high depth (235), plus glowing cyan arm at (10, 9)
+        // where raw monocular depth mistakenly dropped to 22 (sky depth)
+        for (y in 10..13) {
+            for (x in 10..13) {
+                val i = y * w + x
+                rawDepth[i] = 235f
+                fgMask[i] = 255f
+            }
+        }
+        val glowingArmIdx = 9 * w + 10
+        rawDepth[glowingArmIdx] = 22f // raw depth fell into sky
+        fgMask[glowingArmIdx] = 245f  // closed foreground mask includes the glowing arm
+
+        val processed = DepthOps.postProcessDepth(rawDepth, fgMask, w, h)
+
+        // 1. Glowing arm must be fused to character's near Z-plane (>= 200f) instead of falling into sky (22f)
+        assertTrue(
+            "Glowing arm depth (${processed[glowingArmIdx]}) should fuse to character near plane",
+            processed[glowingArmIdx] >= 200f
+        )
+
+        // 2. Distant open sky at (2, 2) should be compressed into deep parallax layer (< 20f)
+        val skyDepth = processed[2 * w + 2]
+        assertTrue("Distant sky ($skyDepth) should be in deep parallax layer", skyDepth < 20f)
+
+        // 3. Isolated mid-sky bird/leaf at (5, 4) should be decoupled onto aerial mid-sky plane (~48f)
+        val birdDepth = processed[4 * w + 5]
+        assertEquals(48f, birdDepth, 1.0f)
+
+        // 4. Main cliff/terrain at (2, 16) should be pulled toward ZERO_PLANE (89.25f)
+        val cliffDepth = processed[16 * w + 2]
+        assertTrue(
+            "Cliff depth ($cliffDepth) should be stabilized closer to ZERO_PLANE (89.25)",
+            kotlin.math.abs(cliffDepth - 89.25f) < kotlin.math.abs(102f - 89.25f)
+        )
+    }
 }
