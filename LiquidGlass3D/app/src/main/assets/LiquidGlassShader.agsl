@@ -48,9 +48,9 @@ half4 main(float2 frag) {
     // ---- 1. Depth-driven UV displacement (depth - 0.35) ------------------
     float zoom = 1.0 + 0.07 * depthIntensity * spatial;     // hide revealed borders
     float2 base = (frag - center) / zoom + center;
-    float reach = res.y * (0.055 + 0.025 * popOut3d) * depthIntensity * spatial;
-    float2 idleOrbit = float2(sin(time * 0.75), cos(time * 0.55)) * 0.14 * popOut3d * spatial;
-    float2 off = clamp(float2(tilt.x, tilt.y) + idleOrbit, float2(-1.25), float2(1.25));
+    float reach = res.y * (0.045 + 0.008 * popOut3d) * depthIntensity * spatial;
+    float2 idleOrbit = float2(sin(time * 0.75), cos(time * 0.55)) * 0.05 * popOut3d * spatial;
+    float2 off = clamp(float2(tilt.x, tilt.y) + idleOrbit, float2(-1.1), float2(1.1));
 
     // Iterative parallax mapping: re-read depth at the displaced coordinate so
     // foreground subjects "pop" forward and backgrounds recess without tearing.
@@ -76,7 +76,12 @@ half4 main(float2 frag) {
 
     // ---- 3. Chromatic dispersion + Living Background animation ----------
     float fgSoft = smoothstep(0.25, 0.65, maskAt(p));
-    float bgMask = (1.0 - fgSoft) * livingEnabled * livingIntensity;
+    // Keep the moving background glued to the subject: fade motion out near its edges
+    float ring = 16.0 * unit;
+    float nearFg = max(max(maskAt(p + float2(ring, 0)), maskAt(p - float2(ring, 0))),
+                       max(maskAt(p + float2(0, ring)), maskAt(p - float2(0, ring))));
+    float edgeGuard = 1.0 - smoothstep(0.15, 0.6, max(nearFg, fgSoft));
+    float bgMask = edgeGuard * livingEnabled * livingIntensity;
     float2 uv = p / max(res, float2(1.0));
     float2 bgDelta = float2(0.0);
     float bgShimmer = 0.0;
@@ -98,7 +103,7 @@ half4 main(float2 frag) {
         half3 c1 = photoAt(p - off1);
         half3 cloudFlow = mix(c0, c1, half(blendW));
 
-        float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
+        float disp = refraction * edge * 2.5 * unit * (0.6 + 0.4 * spatial);
         col.r = mix(photoAt(p + edgeDir * disp).r, cloudFlow.r, half(skyZone));
         col.g = mix(photoAt(p).g, cloudFlow.g, half(skyZone));
         col.b = mix(photoAt(p - edgeDir * disp).b, cloudFlow.b, half(skyZone));
@@ -128,24 +133,17 @@ half4 main(float2 frag) {
         }
 
         float2 pCol = clampP(p + bgDelta);
-        float disp = refraction * edge * 14.0 * unit * (0.6 + 0.4 * spatial);
+        float disp = refraction * edge * 2.5 * unit * (0.6 + 0.4 * spatial);
         col.r = photoAt(pCol + edgeDir * disp).r;
         col.g = photoAt(pCol).g;
         col.b = photoAt(pCol - edgeDir * disp).b;
     }
 
-    // ---- 3b. 3DS Pop-Out: foreground lift + 3D cast shadow on background -
+    // ---- 3b. 3DS Pop-Out: subtle cast shadow only (no duplicated subject layer) -
     if (popOut3d * spatial > 0.5) {
-        float popScale = 1.0 + 0.032 * depthIntensity;
-        float2 pPop = clampP(center + (p - center) / popScale);
-        half3 fgPopCol = photoAt(pPop);
-        col = mix(col, fgPopCol * half(1.03), half(fgSoft));
-
-        // Soft floating drop shadow cast onto recessed background behind subject
-        float2 shadowOffset = off * 20.0 * unit + float2(7.0, 12.0) * unit;
+        float2 shadowOffset = off * 9.0 * unit + float2(3.0, 5.0) * unit;
         float shadowMask = maskAt(p - shadowOffset) * (1.0 - fgSoft);
-        float recess = 0.89 + 0.11 * d;
-        col *= half(mix(1.0, recess * (1.0 - 0.34 * shadowMask), 1.0 - fgSoft));
+        col *= half(1.0 - 0.14 * shadowMask);
     }
 
     // ---- 4. Dynamic specular sheen on the subject ------------------------

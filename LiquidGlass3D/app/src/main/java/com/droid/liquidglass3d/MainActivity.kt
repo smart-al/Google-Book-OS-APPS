@@ -474,7 +474,7 @@ private fun ControlsPane(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("3DS Pop-Out Depth", style = MaterialTheme.typography.titleMedium)
-                    Text("Lifts foreground subject forward with 3D cast shadow & gentle orbit", style = MaterialTheme.typography.bodySmall)
+                    Text("Adds a soft cast shadow & gentle idle orbit behind the subject", style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(
                     checked = s.popOut3d,
