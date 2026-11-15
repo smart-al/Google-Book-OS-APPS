@@ -30,6 +30,7 @@ class LiquidGlassUnitTest {
         assertTrue(s.livingBackgroundEnabled)
         assertEquals(LivingMotionMode.AUTO, s.livingMotionMode)
         assertEquals(0.75f, s.livingMotionIntensity, 0.001f)
+        assertTrue(s.popOut3d)
     }
 
     @Test

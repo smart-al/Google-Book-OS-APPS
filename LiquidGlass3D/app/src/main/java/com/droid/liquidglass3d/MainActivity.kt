@@ -471,6 +471,18 @@ private fun ControlsPane(
                 Switch(checked = s.spatialEnabled, onCheckedChange = { v -> vm.updateSettings { it.copy(spatialEnabled = v) } })
             }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("3DS Pop-Out Depth", style = MaterialTheme.typography.titleMedium)
+                    Text("Lifts foreground subject forward with 3D cast shadow & gentle orbit", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = s.popOut3d,
+                    enabled = s.spatialEnabled,
+                    onCheckedChange = { v -> vm.updateSettings { it.copy(popOut3d = v) } },
+                )
+            }
+
             LabeledSlider("Depth Intensity", s.depthIntensity, 0f..1.5f, enabled = s.spatialEnabled) { v ->
                 vm.updateSettings { it.copy(depthIntensity = v) }
             }

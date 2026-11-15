@@ -46,6 +46,7 @@ class LiquidGlassRobolectricTest {
             livingBackgroundEnabled = false,
             livingMotionMode = LivingMotionMode.OCEAN,
             livingMotionIntensity = 1.15f,
+            popOut3d = false,
         )
 
         SceneStore.saveSettings(context, updated)
@@ -70,6 +71,7 @@ class LiquidGlassRobolectricTest {
         assertEquals(updated.livingBackgroundEnabled, loaded.livingBackgroundEnabled)
         assertEquals(updated.livingMotionMode, loaded.livingMotionMode)
         assertEquals(updated.livingMotionIntensity, loaded.livingMotionIntensity, 0.001f)
+        assertEquals(updated.popOut3d, loaded.popOut3d)
     }
 
     @Test

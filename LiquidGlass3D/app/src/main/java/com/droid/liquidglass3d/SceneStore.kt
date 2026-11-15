@@ -110,6 +110,8 @@ data class GlassSettings(
     val livingBackgroundEnabled: Boolean = true,
     val livingMotionMode: LivingMotionMode = LivingMotionMode.AUTO,
     val livingMotionIntensity: Float = 0.75f,
+    // 3DS-style pop-out depth boost (cast shadow, foreground lift, idle micro-orbit)
+    val popOut3d: Boolean = true,
 )
 
 /** Decoded source image + depth map + subject mask, as cached in `filesDir`. */
@@ -146,6 +148,7 @@ object SceneStore {
     const val KEY_LIVING_MODE = "living_motion_mode"
     const val KEY_LIVING_INTENSITY = "living_motion_intensity"
     const val KEY_DETECTED_MOTION = "detected_living_motion"
+    const val KEY_POP_OUT_3D = "pop_out_3d"
 
     const val SOURCE_FILE = "source.jpg"
     const val DEPTH_FILE = "depth.png"
@@ -194,6 +197,7 @@ object SceneStore {
             livingBackgroundEnabled = p.getBoolean(KEY_LIVING_BG, d.livingBackgroundEnabled),
             livingMotionMode = livingMode,
             livingMotionIntensity = p.getFloat(KEY_LIVING_INTENSITY, d.livingMotionIntensity).coerceIn(0f, 1.5f),
+            popOut3d = p.getBoolean(KEY_POP_OUT_3D, d.popOut3d),
         )
     }
 
@@ -218,6 +222,7 @@ object SceneStore {
             .putBoolean(KEY_LIVING_BG, s.livingBackgroundEnabled)
             .putString(KEY_LIVING_MODE, s.livingMotionMode.name)
             .putFloat(KEY_LIVING_INTENSITY, s.livingMotionIntensity)
+            .putBoolean(KEY_POP_OUT_3D, s.popOut3d)
             .apply()
     }
 

@@ -198,6 +198,7 @@ class LiquidGlassRenderer(context: Context) {
         shader.setFloatUniform("livingEnabled", if (settings.livingBackgroundEnabled) 1f else 0f)
         shader.setFloatUniform("livingMode", effectiveMotion.shaderIndex)
         shader.setFloatUniform("livingIntensity", settings.livingMotionIntensity.coerceIn(0f, 1.5f))
+        shader.setFloatUniform("popOut3d", if (settings.popOut3d) 1f else 0f)
 
         canvas.drawRect(0f, 0f, surfaceW.toFloat(), surfaceH.toFloat(), paint)
     }
