@@ -114,13 +114,14 @@ data class GlassSettings(
     val popOut3d: Boolean = true,
 )
 
-/** Decoded source image + depth map + subject mask, as cached in `filesDir`. */
+/** Decoded source image + depth map + subject mask + RGB semantic motion map, as cached in `filesDir`. */
 class SceneBitmaps(
     val photo: Bitmap,
     val depth: Bitmap,
     val mask: Bitmap,
     val detectedMode: MaskMode = MaskMode.OBJECT,
     val detectedMotion: LivingMotionMode = LivingMotionMode.AURA,
+    val motion: Bitmap = mask,
 )
 
 object SceneStore {
@@ -156,6 +157,7 @@ object SceneStore {
     const val MASK_PORTRAIT_FILE = "mask_portrait.png"
     const val MASK_OBJECT_FILE = "mask_object.png"
     const val MASK_NATURE_FILE = "mask_nature.png"
+    const val MOTION_FILE = "motion_mask.png"
 
     fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -270,7 +272,22 @@ object SceneStore {
         val photo = BitmapFactory.decodeFile(File(dir, SOURCE_FILE).path) ?: return null
         val depth = BitmapFactory.decodeFile(File(dir, DEPTH_FILE).path) ?: return null
         val mask = BitmapFactory.decodeFile(maskFile.path) ?: return null
-        return SceneBitmaps(photo, depth, mask, detected, detectedMotion)
+        val motionFile = File(dir, MOTION_FILE)
+        val motion = if (motionFile.exists()) {
+            BitmapFactory.decodeFile(motionFile.path) ?: LivingMotionOps.buildMotionMaskBitmap(photo, depth, mask)
+        } else {
+            LivingMotionOps.buildMotionMaskBitmap(photo, depth, mask).also { saveMotionBitmap(context, it) }
+        }
+        return SceneBitmaps(photo, depth, mask, detected, detectedMotion, motion)
+    }
+
+    fun saveMotionBitmap(context: Context, motion: Bitmap) {
+        val target = File(context.filesDir, MOTION_FILE)
+        val tmp = File(context.filesDir, "$MOTION_FILE.tmp")
+        runCatching {
+            tmp.outputStream().use { motion.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            tmp.renameTo(target)
+        }
     }
 
     /** Switches active mask.png from cached variants and notifies wallpaper engine. */
@@ -301,6 +318,7 @@ object SceneStore {
             File(dir, MASK_FILE).copyTo(File(dir, MASK_PORTRAIT_FILE), overwrite = true)
             File(dir, MASK_FILE).copyTo(File(dir, MASK_OBJECT_FILE), overwrite = true)
             File(dir, MASK_FILE).copyTo(File(dir, MASK_NATURE_FILE), overwrite = true)
+            File(dir, MOTION_FILE).delete()
             saveDetectedMode(context, MaskMode.PORTRAIT)
             saveDetectedMotion(context, LivingMotionMode.CLOUDS)
             bumpSceneVersion(context)
@@ -385,10 +403,27 @@ object GlassColorOps {
     }
 }
 
+enum class MotionRegionType {
+    CLOUDS,
+    WATER,
+    BIRDS_ANIMALS,
+    FOLIAGE,
+    STATIC,
+}
+
+data class MotionRegion(
+    val type: MotionRegionType,
+    val xmin: Float,
+    val ymin: Float,
+    val xmax: Float,
+    val ymax: Float,
+)
+
 /**
- * On-device AI scene-motion classifier that inspects background color & spatial zones
- * (sky/clouds, ocean/water, foliage/breeze, or portrait/ambient aura) to automatically
- * select the most lifelike background animation for any photo.
+ * AI scene-motion analyzer that builds both:
+ *  - a 3-channel RGB semantic motion mask (`R = Clouds/Sky`, `G = Water/Ocean`,
+ *    `B = Birds/Animals/Leaves/Foliage`, `0,0,0 = Static Solid Terrain/Structures & Subject`), and
+ *  - a dominant [LivingMotionMode] classification.
  */
 object LivingMotionOps {
 
@@ -398,6 +433,169 @@ object LivingMotionOps {
         } else {
             selected
         }
+
+    /**
+     * Builds an RGB semantic motion mask [Bitmap] (`R=Clouds`, `G=Water`, `B=Birds/Animals/Foliage`,
+     * `Black=Static Rigid Terrain/Buildings & Foreground Subject`).
+     */
+    fun buildMotionMaskBitmap(
+        photo: Bitmap,
+        depth: Bitmap,
+        mask: Bitmap,
+        aiRegions: List<MotionRegion> = emptyList(),
+    ): Bitmap {
+        val w = photo.width.coerceAtLeast(1)
+        val h = photo.height.coerceAtLeast(1)
+        val scaledDepth = if (depth.width == w && depth.height == h) depth else Bitmap.createScaledBitmap(depth, w, h, true)
+        val scaledMask = if (mask.width == w && mask.height == h) mask else Bitmap.createScaledBitmap(mask, w, h, true)
+        val n = w * h
+        val photoPx = IntArray(n).also { photo.getPixels(it, 0, w, 0, 0, w, h) }
+        val depthPx = IntArray(n).also { scaledDepth.getPixels(it, 0, w, 0, 0, w, h) }
+        val maskPx = IntArray(n).also { scaledMask.getPixels(it, 0, w, 0, 0, w, h) }
+        val depthGray = FloatArray(n) { ((depthPx[it] ushr 16) and 0xFF).toFloat() }
+        val fgMask = FloatArray(n) { ((maskPx[it] ushr 16) and 0xFF).toFloat() }
+        val outPx = buildMotionMaskChannels(photoPx, depthGray, fgMask, w, h, aiRegions)
+        return Bitmap.createBitmap(outPx, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /**
+     * Computes per-pixel RGB motion weights (`0xFFRRGGBB`):
+     *  - `R` (`0..255`): Movable Clouds, Sky, Mist & Smoke
+     *  - `G` (`0..255`): Movable Water, Ocean, Rivers & Ripples
+     *  - `B` (`0..255`): Movable Birds, Animals, Floating Leaves & Swaying Foliage
+     *  - `0, 0, 0`: Immovable Static Background (cliffs, rocks, buildings, ruins, ground) & Foreground Subject
+     */
+    fun buildMotionMaskChannels(
+        photoPixels: IntArray,
+        depthGray: FloatArray,
+        fgMask: FloatArray,
+        w: Int,
+        h: Int,
+        aiRegions: List<MotionRegion> = emptyList(),
+    ): IntArray {
+        val n = w * h
+        if (w <= 0 || h <= 0 || photoPixels.size < n || depthGray.size < n || fgMask.size < n) {
+            return IntArray(n.coerceAtLeast(0)) { 0xFF000000.toInt() }
+        }
+
+        val regionRadius = kotlin.math.max(2, kotlin.math.min(w, h) / 22)
+        val regionalDepth = DepthOps.boxBlur(depthGray, w, h, regionRadius)
+        val dilatedFg = DepthOps.morphDilate(fgMask, w, h, kotlin.math.max(2, kotlin.math.min(w, h) / 70))
+
+        val rChan = FloatArray(n)
+        val gChan = FloatArray(n)
+        val bChan = FloatArray(n)
+
+        for (y in 0 until h) {
+            val ny = (y + 0.5f) / h.toFloat()
+            val row = y * w
+            for (x in 0 until w) {
+                val nx = (x + 0.5f) / w.toFloat()
+                val i = row + x
+
+                // 1. Keep foreground subject & immediate silhouette guard completely solid in motionTex
+                val fgWeight = (dilatedFg[i] / 255f).coerceIn(0f, 1f)
+                if (fgWeight >= 0.85f) continue
+                val bgFactor = 1f - fgWeight
+
+                val c = photoPixels[i]
+                val r = ((c ushr 16) and 0xFF) / 255f
+                val g = ((c ushr 8) and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val luma = 0.299f * r + 0.587f * g + 0.114f * b
+                val maxC = kotlin.math.max(r, kotlin.math.max(g, b))
+                val minC = kotlin.math.min(r, kotlin.math.min(g, b))
+                val chroma = maxC - minC
+
+                val d = depthGray[i].coerceIn(0f, 255f)
+                val regD = regionalDepth[i].coerceIn(0f, 255f)
+
+                // 2. Detect immovable static terrain / cliffs / stone / buildings
+                // Continuous mid-depth masses (d in 62..165, regD >= 68) that aren't water or foliage stay solid
+                val isWaterColor = ny >= 0.32f && b > r + 0.04f && (b + g) > r * 1.48f && luma in 0.08f..0.88f
+                val isFoliageColor = g > r + 0.03f && g >= b - 0.02f && luma in 0.10f..0.82f
+                val isIsolatedSkySprite = regD < 78f && (d - regD) > 8f && ny < 0.82f
+                val isOpenSkyDepth = d < 66f && regD < 78f
+
+                var isRigidTerrain = !isOpenSkyDepth && !isIsolatedSkySprite && !isWaterColor && !isFoliageColor &&
+                    (d in 60f..175f || regD >= 66f || (ny > 0.65f && luma < 0.45f && chroma < 0.22f))
+
+                var cloudWeight = 0f
+                var waterWeight = 0f
+                var spriteWeight = 0f
+
+                // On-device semantic heuristics
+                if (isIsolatedSkySprite) {
+                    // Birds, floating leaves, petals in the sky
+                    spriteWeight = 0.95f
+                } else if (isWaterColor && d < 165f) {
+                    // Ocean, lakes, rivers, waterfalls
+                    waterWeight = 0.90f
+                } else if (isFoliageColor && d < 170f) {
+                    // Swaying trees, grass, bushes
+                    spriteWeight = 0.78f
+                } else if (isOpenSkyDepth && ny < 0.86f && (luma > 0.30f || b >= r - 0.05f)) {
+                    // Clouds & sky
+                    cloudWeight = ((72f - d) / 50f).coerceIn(0.35f, 1.0f)
+                }
+
+                // 3. Apply Gemini Vision AI region overrides when available
+                var forcedStatic = false
+                for (reg in aiRegions) {
+                    if (nx in reg.xmin..reg.xmax && ny in reg.ymin..reg.ymax) {
+                        when (reg.type) {
+                            MotionRegionType.STATIC -> {
+                                // Only force static on actual solid terrain/structures, not open sky or isolated birds
+                                if (!isOpenSkyDepth && !isIsolatedSkySprite) {
+                                    forcedStatic = true
+                                }
+                            }
+                            MotionRegionType.CLOUDS -> if (!isRigidTerrain && !isIsolatedSkySprite) {
+                                cloudWeight = kotlin.math.max(cloudWeight, 0.92f)
+                            }
+                            MotionRegionType.WATER -> if (d < 185f) {
+                                waterWeight = kotlin.math.max(waterWeight, 0.92f)
+                                isRigidTerrain = false
+                            }
+                            MotionRegionType.BIRDS_ANIMALS -> {
+                                spriteWeight = kotlin.math.max(spriteWeight, 0.96f)
+                                isRigidTerrain = false
+                            }
+                            MotionRegionType.FOLIAGE -> if (d < 185f) {
+                                spriteWeight = kotlin.math.max(spriteWeight, 0.85f)
+                                isRigidTerrain = false
+                            }
+                        }
+                    }
+                }
+
+                if (forcedStatic || (isRigidTerrain && waterWeight == 0f && spriteWeight == 0f)) {
+                    cloudWeight = 0f
+                    waterWeight = 0f
+                    spriteWeight = 0f
+                }
+
+                rChan[i] = (cloudWeight * bgFactor * 255f).coerceIn(0f, 255f)
+                gChan[i] = (waterWeight * bgFactor * 255f).coerceIn(0f, 255f)
+                bChan[i] = (spriteWeight * bgFactor * 255f).coerceIn(0f, 255f)
+            }
+        }
+
+        // Smooth motion channel boundaries while strictly zeroing out the foreground subject core
+        val smoothR = kotlin.math.max(1, kotlin.math.min(w, h) / 110)
+        val rBlur = DepthOps.boxBlur(rChan, w, h, smoothR)
+        val gBlur = DepthOps.boxBlur(gChan, w, h, smoothR)
+        val bBlur = DepthOps.boxBlur(bChan, w, h, smoothR)
+
+        return IntArray(n) { i ->
+            val fg = (fgMask[i] / 255f).coerceIn(0f, 1f)
+            val keep = (1f - fg * fg)
+            val rv = (rBlur[i] * keep).toInt().coerceIn(0, 255)
+            val gv = (gBlur[i] * keep).toInt().coerceIn(0, 255)
+            val bv = (bBlur[i] * keep).toInt().coerceIn(0, 255)
+            (0xFF shl 24) or (rv shl 16) or (gv shl 8) or bv
+        }
+    }
 
     fun detectFromBitmap(photo: Bitmap, mask: Bitmap, detectedMaskMode: MaskMode): LivingMotionMode {
         val gridW = 24

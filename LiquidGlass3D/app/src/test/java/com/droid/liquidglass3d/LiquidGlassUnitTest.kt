@@ -433,4 +433,86 @@ class LiquidGlassUnitTest {
             kotlin.math.abs(cliffDepth - 89.25f) < kotlin.math.abs(102f - 89.25f)
         )
     }
+
+    @Test
+    fun testAiSemanticMotionMaskAndJsonParser() {
+        val json = """
+            ```json
+            {"regions":[
+                {"type":"CLOUDS","box":[0.0,0.0,0.4,1.0]},
+                {"type":"STATIC","box":[0.4,0.0,0.75,1.0]},
+                {"type":"WATER","box":[750,0,1000,1000]},
+                {"type":"BIRDS_ANIMALS","box":[0.1,0.2,0.25,0.35]}
+            ]}
+            ```
+        """.trimIndent()
+        val regions = NanoBananaExpander.parseMotionRegionsJson(json)
+        assertEquals(4, regions.size)
+        assertEquals(MotionRegionType.CLOUDS, regions[0].type)
+        assertEquals(MotionRegionType.STATIC, regions[1].type)
+        assertEquals(MotionRegionType.WATER, regions[2].type)
+        assertEquals(0.75f, regions[2].ymin, 0.01f)
+        assertEquals(1.0f, regions[2].ymax, 0.01f)
+        assertEquals(MotionRegionType.BIRDS_ANIMALS, regions[3].type)
+
+        val w = 20
+        val h = 20
+        val pixels = IntArray(w * h)
+        val depth = FloatArray(w * h)
+        val fgMask = FloatArray(w * h)
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val i = y * w + x
+                when {
+                    y < 7 -> {
+                        pixels[i] = 0xFFB8E2FF.toInt() // sky/clouds
+                        depth[i] = 24f
+                    }
+                    y in 7..14 -> {
+                        pixels[i] = 0xFF5A524C.toInt() // solid gray-brown cliff rock
+                        depth[i] = 105f
+                    }
+                    else -> {
+                        pixels[i] = 0xFF0077BE.toInt() // lower ocean water
+                        depth[i] = 90f
+                    }
+                }
+            }
+        }
+        // Foreground character at (10, 10)
+        fgMask[10 * w + 10] = 255f
+
+        val maskPx = LivingMotionOps.buildMotionMaskChannels(pixels, depth, fgMask, w, h, regions)
+
+        // Sky pixel at (10, 2) -> Red channel (Clouds) active
+        val skyC = maskPx[2 * w + 10]
+        val skyR = (skyC ushr 16) and 0xFF
+        assertTrue("Sky pixel should have active Red (clouds) motion channel, was $skyR", skyR > 80)
+
+        // Bird region at (5, 3) -> Blue channel (Birds/Animals) active
+        val birdC = maskPx[3 * w + 5]
+        val birdB = birdC and 0xFF
+        assertTrue("Bird region should have active Blue (sprite) motion channel, was $birdB", birdB > 100)
+
+        // Solid cliff pixel at (2, 10) -> R, G, B should all be 0 (immovable solid background)
+        val cliffC = maskPx[10 * w + 2]
+        val cliffR = (cliffC ushr 16) and 0xFF
+        val cliffG = (cliffC ushr 8) and 0xFF
+        val cliffB = cliffC and 0xFF
+        assertEquals("Solid cliff R must be 0", 0, cliffR)
+        assertEquals("Solid cliff G must be 0", 0, cliffG)
+        assertEquals("Solid cliff B must be 0", 0, cliffB)
+
+        // Water pixel at (10, 18) -> Green channel (Water) active
+        val waterC = maskPx[18 * w + 10]
+        val waterG = (waterC ushr 8) and 0xFF
+        assertTrue("Water region should have active Green (water) motion channel, was $waterG", waterG > 100)
+
+        // Foreground subject pixel at (10, 10) -> R, G, B must be 0
+        val fgC = maskPx[10 * w + 10]
+        assertEquals(0, (fgC ushr 16) and 0xFF)
+        assertEquals(0, (fgC ushr 8) and 0xFF)
+        assertEquals(0, fgC and 0xFF)
+    }
 }

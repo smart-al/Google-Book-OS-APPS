@@ -27,6 +27,7 @@ class PreparedScene(
     val width: Int,
     val height: Int,
     val detectedMotion: LivingMotionMode = LivingMotionMode.AURA,
+    val motion: Bitmap = mask,
 )
 
 /**
@@ -85,6 +86,7 @@ class LiquidGlassRenderer(context: Context) {
             w,
             h,
             scene.detectedMotion,
+            coverCrop(scene.motion, w, h),
         )
 
     /** Cheap part: call on the render thread. */
@@ -94,6 +96,7 @@ class LiquidGlassRenderer(context: Context) {
         shader.setInputShader("photo", clampShader(p.photo))
         shader.setInputShader("depthTex", clampShader(p.depth))
         shader.setInputShader("maskTex", clampShader(p.mask))
+        shader.setInputShader("motionTex", clampShader(p.motion))
         lastScale = -1f
         lastClockMinute = -1L
         sceneReady = true

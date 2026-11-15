@@ -114,10 +114,19 @@ class DepthEstimator(
                 MaskMode.AUTO -> objectBmp
             }
             save(activeBmp, SceneStore.MASK_FILE)
+            val activeMaskArray = when (effective) {
+                MaskMode.PORTRAIT -> portraitMask
+                MaskMode.OBJECT -> u2netMask
+                MaskMode.NATURE -> natureMask
+                MaskMode.AUTO -> u2netMask
+            }
+            val motionPx = LivingMotionOps.buildMotionMaskChannels(photoPixels, depthGray, activeMaskArray, w, h)
+            val motionBmp = Bitmap.createBitmap(motionPx, w, h, Bitmap.Config.ARGB_8888)
+            save(motionBmp, SceneStore.MOTION_FILE)
             val detectedMotion = LivingMotionOps.detectFromBitmap(photo, activeBmp, detectedMode)
             SceneStore.saveDetectedMotion(context, detectedMotion)
             SceneStore.bumpSceneVersion(context)
-            SceneBitmaps(photo, depthBmp, activeBmp, detectedMode, detectedMotion)
+            SceneBitmaps(photo, depthBmp, activeBmp, detectedMode, detectedMotion, motionBmp)
         }
 
     private fun loadModelBuffer(assetName: String): ByteBuffer {

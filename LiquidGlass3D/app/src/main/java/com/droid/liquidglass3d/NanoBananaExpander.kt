@@ -134,6 +134,113 @@ object NanoBananaExpander {
         }
     }
 
+    /**
+     * Parses a JSON array or object containing `regions` from Gemini (`gemini-4-hydrogen`)
+     * into normalized `0..1` [MotionRegion] bounding boxes.
+     * Supports both `0..1` normalized floats and `0..1000` normalized integer coordinates.
+     */
+    fun parseMotionRegionsJson(rawText: String): List<MotionRegion> {
+        val cleaned = rawText
+            .replace("```json", "", ignoreCase = true)
+            .replace("```", "")
+            .trim()
+        if (cleaned.isBlank()) return emptyList()
+
+        val itemRegex = Regex(
+            """\{\s*"type"\s*:\s*"([^"]+)"\s*,\s*"box"\s*:\s*\[\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*]""",
+            RegexOption.IGNORE_CASE,
+        )
+        val result = ArrayList<MotionRegion>()
+        for (match in itemRegex.findAll(cleaned)) {
+            val typeStr = match.groupValues[1].uppercase()
+            val type = when {
+                "CLOUD" in typeStr || "SKY" in typeStr -> MotionRegionType.CLOUDS
+                "WATER" in typeStr || "OCEAN" in typeStr || "SEA" in typeStr || "RIVER" in typeStr -> MotionRegionType.WATER
+                "BIRD" in typeStr || "ANIMAL" in typeStr || "SPRITE" in typeStr || "LEAF" in typeStr -> MotionRegionType.BIRDS_ANIMALS
+                "FOLIAGE" in typeStr || "TREE" in typeStr || "GRASS" in typeStr || "PLANT" in typeStr -> MotionRegionType.FOLIAGE
+                "STATIC" in typeStr || "SOLID" in typeStr || "CLIFF" in typeStr || "ROCK" in typeStr || "BUILDING" in typeStr -> MotionRegionType.STATIC
+                else -> continue
+            }
+            var y0 = match.groupValues[2].toFloatOrNull() ?: continue
+            var x0 = match.groupValues[3].toFloatOrNull() ?: continue
+            var y1 = match.groupValues[4].toFloatOrNull() ?: continue
+            var x1 = match.groupValues[5].toFloatOrNull() ?: continue
+            if (y0 > 1.5f || x0 > 1.5f || y1 > 1.5f || x1 > 1.5f) {
+                y0 /= 1000f; x0 /= 1000f; y1 /= 1000f; x1 /= 1000f
+            }
+            val xmin = minOf(x0, x1).coerceIn(0f, 1f)
+            val xmax = maxOf(x0, x1).coerceIn(0f, 1f)
+            val ymin = minOf(y0, y1).coerceIn(0f, 1f)
+            val ymax = maxOf(y0, y1).coerceIn(0f, 1f)
+            if (xmax > xmin && ymax > ymin) {
+                result.add(MotionRegion(type, xmin, ymin, xmax, ymax))
+            }
+        }
+        return result
+    }
+
+    /**
+     * Uses Gemini (`gemini-4-hydrogen`) to identify movable background elements
+     * (`CLOUDS`, `WATER`, `BIRDS_ANIMALS`, `FOLIAGE`) vs immovable background elements (`STATIC`
+     * cliffs, mountains, rocks, buildings, ground) so only movable objects animate.
+     */
+    suspend fun analyzeMovableRegions(apiKey: String, source: Bitmap): List<MotionRegion> =
+        withContext(Dispatchers.IO) {
+            val trimmedKey = apiKey.trim()
+            if (trimmedKey.isBlank()) return@withContext emptyList()
+
+            val jpegBytes = ByteArrayOutputStream().use { out ->
+                source.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                out.toByteArray()
+            }
+            val b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+            val prompt = """
+                Analyze the background of this image and separate movable elements from immovable solid structures.
+                Return ONLY valid JSON in the exact format:
+                {"regions":[{"type":"CLOUDS|WATER|BIRDS_ANIMALS|FOLIAGE|STATIC","box":[ymin,xmin,ymax,xmax]}]}
+                where coordinates are normalized 0.0 to 1.0:
+                - CLOUDS: clouds, sky, mist, smoke
+                - WATER: ocean, sea, rivers, waterfalls, lakes
+                - BIRDS_ANIMALS: flying birds, animals, floating leaves/petals
+                - FOLIAGE: swaying trees, grass, bushes
+                - STATIC: immovable cliffs, rocks, mountains, buildings, bridges, ruins, solid ground
+            """.trimIndent()
+            val content = JSONObject().put(
+                "parts",
+                JSONArray()
+                    .put(JSONObject().put("text", prompt))
+                    .put(JSONObject().put("inlineData", JSONObject().put("mimeType", "image/jpeg").put("data", b64))),
+            )
+            val body = JSONObject().put("contents", JSONArray().put(content)).toString()
+
+            val conn = (URL(VISION_ENDPOINT).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 12_000
+                readTimeout = 22_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("x-goog-api-key", trimmedKey)
+            }
+            try {
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                if (conn.responseCode !in 200..299) return@withContext emptyList()
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                val reply = JSONObject(text)
+                    .optJSONArray("candidates")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("content")
+                    ?.optJSONArray("parts")
+                    ?.optJSONObject(0)
+                    ?.optString("text")
+                    .orEmpty()
+                parseMotionRegionsJson(reply)
+            } catch (_: Exception) {
+                emptyList()
+            } finally {
+                conn.disconnect()
+            }
+        }
+
     /** Uses Gemini (`gemini-4-hydrogen`) to classify the best background animation for [source]. */
     suspend fun classifyBackgroundMotion(apiKey: String, source: Bitmap): LivingMotionMode? =
         withContext(Dispatchers.IO) {
