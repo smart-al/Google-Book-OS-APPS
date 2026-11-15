@@ -452,26 +452,16 @@ private fun ControlsPane(
         ) {
             Text("LiquidGlass3D", style = MaterialTheme.typography.headlineMedium)
 
-            // AI Mask Section
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val detected = ui.scene?.detectedMode?.label
-                val subtitle = if (s.maskMode == MaskMode.AUTO && detected != null) {
-                    "AI Subject Mask · Detected: $detected"
-                } else {
-                    "AI Subject Mask"
-                }
-                Text(subtitle, style = MaterialTheme.typography.titleSmall)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    MaskMode.entries.forEach { mode ->
-                        FilterChip(
-                            selected = s.maskMode == mode,
-                            onClick = { vm.selectMaskMode(mode) },
-                            label = { Text(mode.label) },
-                        )
-                    }
+            // AI Subject Mask (Fully Automatic)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    val detected = ui.scene?.detectedMode?.label ?: "Automatic"
+                    Text("AI Subject Mask", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Automatic · $detected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -562,23 +552,18 @@ private fun ControlsPane(
                 vm.updateSettings { it.copy(clockScale = v) }
             }
 
-            // Movable Clock Position Controls
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Clock Position", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                    OutlinedButton(
-                        onClick = { vm.updateSettings { it.copy(clockPosX = 0.5f, clockPosY = 0.16f) } },
-                        modifier = Modifier.height(32.dp),
-                    ) {
-                        Text("Center", style = MaterialTheme.typography.labelSmall)
-                    }
+            // Movable Clock Position Controls (Drag directly in preview + Center pill button)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Clock Position", style = MaterialTheme.typography.titleMedium)
+                    Text("Drag directly with mouse or touch in the preview", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text("Drag directly with mouse in the 16:10 preview, or adjust:", style = MaterialTheme.typography.bodySmall)
-                LabeledSlider("Horizontal (X)", s.clockPosX, 0f..1f) { v ->
-                    vm.updateSettings { it.copy(clockPosX = v) }
-                }
-                LabeledSlider("Vertical (Y)", s.clockPosY, 0f..1f) { v ->
-                    vm.updateSettings { it.copy(clockPosY = v) }
+                FilledTonalButton(
+                    onClick = { vm.updateSettings { it.copy(clockPosX = 0.5f, clockPosY = 0.16f) } },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.height(36.dp),
+                ) {
+                    Text("Center")
                 }
             }
 

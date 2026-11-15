@@ -106,8 +106,7 @@ half4 main(float2 frag) {
     float zoom = 1.0 + 0.075 * depthIntensity * spatial;    // hide revealed borders
     float2 base = (frag - center) / zoom + center;
     float reach = res.y * (0.054 + 0.016 * popOut3d) * depthIntensity * spatial;
-    float2 idleOrbit = float2(sin(time * 0.75), cos(time * 0.55)) * 0.05 * popOut3d * spatial;
-    float2 off = clamp(float2(tilt.x, tilt.y) + idleOrbit, float2(-1.1), float2(1.1));
+    float2 off = clamp(float2(tilt.x, tilt.y), float2(-1.1), float2(1.1));
 
     // Iterative parallax mapping using tri-layer sceneDepthAt:
     // Foreground pops cleanly, cliff anchor stays stationary at ZERO_PLANE, sky recedes deeply.
@@ -175,7 +174,7 @@ half4 main(float2 frag) {
     float2 windDrift = float2(
         sin(time * 1.65 + uv.y * 13.0 + uv.x * 8.0) * 7.5,
         cos(time * 2.15 + uv.x * 16.0 - uv.y * 10.0) * 4.0
-    ) * unit * midSkySprite * max(spatial, livingEnabled);
+    ) * unit * midSkySprite * livingEnabled;
 
     float bgActive = edgeGuard * livingEnabled * max(0.75, livingIntensity) + livingMode * 0.0;
     float waterW  = waterMask * bgActive;
