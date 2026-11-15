@@ -36,6 +36,7 @@ const float ZERO_PLANE = 0.35;  // depth value that stays "on screen"
 float2 clampP(float2 p) { return clamp(p, float2(0.5), res - 0.5); }
 float  depthAt(float2 p) { return depthTex.eval(clampP(p)).r; }
 float  maskAt(float2 p)  { return maskTex.eval(clampP(p)).r; }
+half3  motionAt(float2 p){ return motionTex.eval(clampP(p)).rgb; }
 half3  photoAt(float2 p) { return photo.eval(clampP(p)).rgb; }
 
 // Morphological closing approximation + edge-aware glow bridge in shader space:

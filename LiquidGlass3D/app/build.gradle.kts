@@ -13,8 +13,8 @@ android {
     applicationId = "com.droid.liquidglass3d"
     minSdk = 33 // RuntimeShader (AGSL) requires API 33
     targetSdk = 37
-    versionCode = 5
-    versionName = "1.4.0"
+    versionCode = 6
+    versionName = "1.5.0"
     ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
   }
 
