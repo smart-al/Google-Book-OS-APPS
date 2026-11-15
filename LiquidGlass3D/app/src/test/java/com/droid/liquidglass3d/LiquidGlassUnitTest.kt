@@ -85,7 +85,7 @@ class LiquidGlassUnitTest {
     @Test
     fun testClockFonts() {
         val fonts = ClockFont.entries
-        assertEquals(6, fonts.size)
+        assertEquals(16, fonts.size)
         fonts.forEach { font ->
             assertNotNull(font.family)
             assertFalse(font.label.isBlank())

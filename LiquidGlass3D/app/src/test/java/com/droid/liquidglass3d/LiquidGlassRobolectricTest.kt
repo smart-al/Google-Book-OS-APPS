@@ -262,19 +262,9 @@ class LiquidGlassRobolectricTest {
 
     @Test
     fun testSceneStoreDemoAndActivationFlow() {
-        // Test loadDemoScene from bundled assets
+        // Sample image was removed; loadDemoScene returns null
         val scene = SceneStore.loadDemoScene(context)
-        if (scene != null) {
-            assertNotNull(scene.photo)
-            assertNotNull(scene.depth)
-            assertNotNull(scene.mask)
-            assertTrue(SceneStore.hasScene(context))
-
-            // Test mask mode activation
-            val activated = SceneStore.activateMaskMode(context, MaskMode.OBJECT)
-            assertNotNull(activated)
-            assertEquals(MaskMode.PORTRAIT, activated?.detectedMode)
-        }
+        assertEquals(null, scene)
     }
 
     @Test

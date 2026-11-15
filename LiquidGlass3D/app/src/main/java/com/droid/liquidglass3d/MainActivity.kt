@@ -387,17 +387,10 @@ private fun PreviewPane(
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(24.dp),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        FilledTonalButton(onClick = onPick) {
-                            Icon(Icons.Filled.Image, null)
-                            Spacer(Modifier.padding(4.dp))
-                            Text("Choose image")
-                        }
-                        Button(onClick = { vm.loadDemo() }) {
-                            Icon(Icons.Filled.CenterFocusStrong, null)
-                            Spacer(Modifier.padding(4.dp))
-                            Text("Try Sample Scene")
-                        }
+                    FilledTonalButton(onClick = onPick) {
+                        Icon(Icons.Filled.Image, null)
+                        Spacer(Modifier.padding(4.dp))
+                        Text("Choose image")
                     }
                 }
             }

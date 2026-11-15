@@ -28,7 +28,17 @@ enum class ClockFont(val label: String, val family: String, val style: Int) {
     BOLD("Bold", "sans-serif-black", Typeface.BOLD),
     THIN("Thin", "sans-serif-thin", Typeface.NORMAL),
     SERIF("Editorial", "serif", Typeface.NORMAL),
+    SERIF_BOLD("Classic Roman", "serif", Typeface.BOLD),
+    SERIF_ITALIC("Poetry Italic", "serif", Typeface.ITALIC),
     MONO("Tech Mono", "monospace", Typeface.BOLD),
+    RETRO_CODE("Retro Code", "monospace", Typeface.NORMAL),
+    CONDENSED("Condensed", "sans-serif-condensed", Typeface.BOLD),
+    CONDENSED_LIGHT("Tall Clean", "sans-serif-condensed-light", Typeface.NORMAL),
+    CONDENSED_MEDIUM("Poster Grotesk", "sans-serif-condensed-medium", Typeface.NORMAL),
+    CASUAL("Casual Script", "casual", Typeface.NORMAL),
+    CURSIVE("Cursive Elegance", "cursive", Typeface.NORMAL),
+    SMALLCAPS("Luxury Caps", "sans-serif-smallcaps", Typeface.NORMAL),
+    ITALIC("Speed Italic", "sans-serif", Typeface.BOLD_ITALIC),
 }
 
 enum class ClockColorPreset(
@@ -302,29 +312,8 @@ object SceneStore {
         return loadScene(context)
     }
 
-    /** Instantly extracts built-in 16:10 sample assets so users can test immediately. */
-    fun loadDemoScene(context: Context): SceneBitmaps? {
-        val dir = context.filesDir
-        runCatching {
-            context.assets.open("sample_source.jpg").use { src ->
-                File(dir, SOURCE_FILE).outputStream().use { dst -> src.copyTo(dst) }
-            }
-            context.assets.open("sample_depth.png").use { src ->
-                File(dir, DEPTH_FILE).outputStream().use { dst -> src.copyTo(dst) }
-            }
-            context.assets.open("sample_mask.png").use { src ->
-                File(dir, MASK_FILE).outputStream().use { dst -> src.copyTo(dst) }
-            }
-            File(dir, MASK_FILE).copyTo(File(dir, MASK_PORTRAIT_FILE), overwrite = true)
-            File(dir, MASK_FILE).copyTo(File(dir, MASK_OBJECT_FILE), overwrite = true)
-            File(dir, MASK_FILE).copyTo(File(dir, MASK_NATURE_FILE), overwrite = true)
-            File(dir, MOTION_FILE).delete()
-            saveDetectedMode(context, MaskMode.PORTRAIT)
-            saveDetectedMotion(context, LivingMotionMode.CLOUDS)
-            bumpSceneVersion(context)
-        }
-        return loadScene(context)
-    }
+    /** Sample image was removed; returns null. Users pick their own photos. */
+    fun loadDemoScene(context: Context): SceneBitmaps? = null
 
     fun bumpSceneVersion(context: Context) {
         val p = prefs(context)

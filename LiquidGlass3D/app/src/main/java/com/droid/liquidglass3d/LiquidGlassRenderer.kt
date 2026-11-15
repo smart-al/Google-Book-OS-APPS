@@ -118,7 +118,14 @@ class LiquidGlassRenderer(context: Context) {
         clockPaint.textSize = panelH * if (settings.showDate) 0.50f else 0.62f
         datePaint.textSize = panelH * 0.14f
         clockPaint.typeface = Typeface.create(settings.clockFont.family, settings.clockFont.style)
-        val dateFamily = if (settings.clockFont == ClockFont.SERIF) "serif" else if (settings.clockFont == ClockFont.MONO) "monospace" else "sans-serif-medium"
+        val dateFamily = when (settings.clockFont) {
+            ClockFont.SERIF, ClockFont.SERIF_BOLD, ClockFont.SERIF_ITALIC -> "serif"
+            ClockFont.MONO, ClockFont.RETRO_CODE -> "monospace"
+            ClockFont.CASUAL -> "casual"
+            ClockFont.CURSIVE -> "cursive"
+            ClockFont.CONDENSED, ClockFont.CONDENSED_LIGHT, ClockFont.CONDENSED_MEDIUM -> "sans-serif-condensed"
+            else -> "sans-serif-medium"
+        }
         datePaint.typeface = Typeface.create(dateFamily, Typeface.NORMAL)
 
         val preset = settings.clockColorPreset
