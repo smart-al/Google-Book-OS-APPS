@@ -22,7 +22,18 @@ Using on-device monocular depth estimation, multi-model AI subject segmentation,
   - **Portrait (Person)**: Detects human subjects using MediaPipe Selfie Multiclass (`face`, `hair`, `body`, `clothes`) and blends with U²-Net for natural hair strands and sharp clothing edges.
   - **Object (Pets, Products, Vehicles)**: Employs U²-Net salient-object segmentation for crisp silhouettes.
   - **Nature / Landscape**: Smooth depth-foreground ramp derived from monocular depth estimation.
+  - **Morphological Closing & Edge-Aware Guided Filter**: Fuses bright glowing regions and energy effects attached to a character (e.g. glowing cyan arms or luminous weapon auras) into the foreground subject mask, preventing edge tearing.
   - Instant mask switching via UI chip selector (`Auto (AI)`, `Person`, `Object`, `Nature`).
+- **AI Semantic Motion & Rigidity Map (Living Background)**
+  - Seamless single toggle switch: the AI automatically analyzes the scene to identify movable elements vs. solid static structures.
+  - Generates an RGB semantic motion map (`motion_mask.png` / `motionTex`):
+    - **Red**: Movable clouds, sky, mist, and smoke (dual-phase continuous flow).
+    - **Green**: Movable ocean, rivers, lakes, and water ripples with sunlight glints.
+    - **Blue**: Movable flying birds, animals, floating leaves, and swaying foliage.
+    - **Black (0, 0, 0)**: Immovable background structures (cliffs, rocks, mountains, buildings, ruins, ground) and the foreground subject remain 100% solid and stationary.
+- **Enhanced 3D Pop & Rim Separation**
+  - High Z-depth separation between primary foreground subject, stationary cliff/terrain anchor plane, and deep recessed sky layer.
+  - Multi-tap parallax-reactive drop shadow and soft contact Ambient Occlusion (AO) halo behind the foreground cutout.
 - **Interactive Liquid Glass AGSL Shader Engine**
   - **Depth UV Displacement**: `p = base + off * (depth - 0.35) * reach` lets foreground subjects pop forward while backgrounds recess into 3D space.
   - **Liquid Glass Refraction**: Dynamic lens distortion, frosted disc-kernel blur, and chromatic dispersion along subject edges.
